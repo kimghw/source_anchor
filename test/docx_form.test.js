@@ -3,22 +3,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fillDocx, scanDocx } from '../lib/docx_form.js';
 import { readZip, writeZip } from '../lib/zip.js';
+import { docxHeading as heading, docxOf, docxP as p, docxSentence as sentence, docxTable as table, docxTc as tc, emptyZip } from './fixtures/form_docs.js';
 
-const emptyZip = () => { const b = Buffer.alloc(22); b.writeUInt32LE(0x06054b50, 0); return b; };
-const docxOf = bodyXml => writeZip(emptyZip(), { '[Content_Types].xml': '<Types/>', 'word/document.xml': `<w:document><w:body>${bodyXml}</w:body></w:document>` });
 const documentOf = data => readZip(data).read('word/document.xml').toString('utf8');
 
-const grid = '<w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="3000"/><w:gridCol w:w="5000"/></w:tblGrid>';
-const tc = (inner, pr = '') => `<w:tc><w:tcPr>${pr}</w:tcPr>${inner}</w:tc>`;
-const p = text => `<w:p><w:pPr><w:jc w:val="center"/><w:rPr><w:sz w:val="20"/></w:rPr></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`;
-const table = `<w:tbl>${grid}
-<w:tr><w:trPr><w:trHeight w:hRule="exact" w:val="620"/></w:trPr>${tc(p('제목'), '<w:gridSpan w:val="3"/>')}</w:tr>
-<w:tr>${tc(p('A'), '<w:vMerge w:val="restart"/>')}${tc(p('과제명'))}${tc('<w:p><w:r><w:t>값1</w:t><w:br/><w:t>둘째</w:t></w:r></w:p><w:p/>')}</w:tr>
-<w:tr>${tc('<w:p/>', '<w:vMerge/>')}${tc(p('장소'))}${tc('<w:p><w:r><w:t>x &amp; y</w:t></w:r><w:r><w:tab/><w:t>z</w:t></w:r></w:p>')}</w:tr>
-<w:tr>${tc('<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r></w:p>')}${tc('<w:p/><w:tbl><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>')}${tc('')}</w:tr>
-</w:tbl>`;
-const heading = '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>1. 제안 개요</w:t></w:r></w:p>';
-const sentence = '<w:p><w:pPr><w:numPr><w:ilvl w:val="1"/></w:numPr></w:pPr><w:r><w:t>본문 문장이다.</w:t></w:r></w:p>';
 const doc = docxOf(`${heading}${sentence}<w:p/>${table}<w:p><w:r><w:t>끝 글</w:t></w:r></w:p>`);
 
 const tableOf = data => scanDocx(data).items.find(i => i.kind === 'table');

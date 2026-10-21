@@ -4,38 +4,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import { fillHwpx, scanHwpx } from '../lib/hwpx_form.js';
 import { readZip, writeZip } from '../lib/zip.js';
+import { bodyPara, cellXml, emptyZip, hwpxOf, hwpxRows as rowsOf, secOf, sectionXml, tablePara } from './fixtures/form_docs.js';
 
-const emptyZip = () => { const b = Buffer.alloc(22); b.writeUInt32LE(0x06054b50, 0); return b; };
-const hwpxOf = sections => writeZip(emptyZip(), {
-  mimetype: 'application/hwp+zip',
-  'version.xml': '<v/>',
-  'Contents/header.xml': '<hh:head version="1.4"/>',
-  ...Object.fromEntries(sections.map((xml, n) => [`Contents/section${n}.xml`, xml])),
-});
 const sectionOf = (data, n = 0) => readZip(data).read(`Contents/section${n}.xml`).toString('utf8');
 
-// test_hwpxform.py cell_xml·multi_para_cell 이식 — paras: [[text, paraPrIDRef, charPrIDRef]] (id 200+k), 빈 글은 자기 닫힘 run
-const LINESEG = pfx => `<${pfx}:linesegarray><${pfx}:lineseg textpos="0" vertpos="0" vertsize="1000"/></${pfx}:linesegarray>`;
-const run = (pfx, ch, text) => (text ? `<${pfx}:run charPrIDRef="${ch}"><${pfx}:t>${text}</${pfx}:t></${pfx}:run>` : `<${pfx}:run charPrIDRef="${ch}"/>`);
-function cellXml({ r, c, text, colSpan = 1, rowSpan = 1, w = 8504, h = 282, pfx = 'hp', addrAfter = true, paras = null }) {
-  const body = paras
-    ? paras.map(([t, pr, ch], k) => `<${pfx}:p id="${200 + k}" paraPrIDRef="${pr}" styleIDRef="0">${run(pfx, ch, t)}${LINESEG(pfx)}</${pfx}:p>`).join('')
-    : `<${pfx}:p id="${100 + 10 * r + c}" paraPrIDRef="7" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">${run(pfx, 10 * r + c + 1, text)}${LINESEG(pfx)}</${pfx}:p>`;
-  const sub = `<${pfx}:subList id="" textDirection="HORIZONTAL" vertAlign="CENTER">${body}</${pfx}:subList>`;
-  const addr = `<${pfx}:cellAddr colAddr="${c}" rowAddr="${r}"/><${pfx}:cellSpan colSpan="${colSpan}" rowSpan="${rowSpan}"/><${pfx}:cellSz width="${w}" height="${h}"/>`;
-  return `<${pfx}:tc name="" header="0" borderFillIDRef="3">${addrAfter ? sub + addr : addr + sub}</${pfx}:tc>`;
-}
-const tablePara = (rows, pfx = 'hp') => `<${pfx}:p id="2" paraPrIDRef="0" styleIDRef="0"><${pfx}:run charPrIDRef="0"><${pfx}:tbl id="9" rowCnt="${rows.length}">${rows.map(row => `<${pfx}:tr>${row.join('')}</${pfx}:tr>`).join('')}</${pfx}:tbl></${pfx}:run></${pfx}:p>`;
-const secOf = (body, pfx = 'hp', secPfx = 'hs') => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><${secPfx}:sec xmlns:${secPfx}="http://www.hancom.co.kr/hwpml/2011/section" xmlns:${pfx}="http://www.hancom.co.kr/hwpml/2011/paragraph">${body}</${secPfx}:sec>`;
-const sectionXml = (rows, pfx = 'hp', secPfx = 'hs') => secOf(`<${pfx}:p id="1" paraPrIDRef="0" styleIDRef="0"><${pfx}:run charPrIDRef="0"><${pfx}:t>신상 조서</${pfx}:t></${pfx}:run></${pfx}:p>${tablePara(rows, pfx)}`, pfx, secPfx);
-const bodyPara = text => `<hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:t>${text}</hp:t></hp:run></hp:p>`;
-
-// 2열 표: 폭 3000/7000, 행0 높이 282, 행1 c0 rowSpan 2, 행1 c1 문단 둘(서식 다름), 행2 c1 빈 칸(자기 닫힘 run)
-const rowsOf = (more = {}) => [
-  [cellXml({ r: 0, c: 0, text: '제안자', w: 3000, ...more }), cellXml({ r: 0, c: 1, text: '홍길동', w: 7000, ...more })],
-  [cellXml({ r: 1, c: 0, text: '기관', rowSpan: 2, w: 3000, h: 782, ...more }), cellXml({ r: 1, c: 1, w: 7000, h: 500, paras: [['한국선급', 7, 12], ['연구소', 8, 13]], ...more })],
-  [cellXml({ r: 2, c: 1, text: '', w: 7000, ...more })],
-];
 const doc = hwpxOf([sectionXml(rowsOf())]);
 const cell = (r, c, text, more = {}) => ({ r, c, colspan: 1, rowspan: 1, text, ...more });
 const tablesOf = data => scanHwpx(data).items.filter(i => i.kind === 'table');
