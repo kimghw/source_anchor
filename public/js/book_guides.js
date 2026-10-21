@@ -20,7 +20,27 @@ export function guidesGroup(bookId, guides, { open, changed }) {
       h('button.btn.small', { type: 'button', title: '규정·규칙·작성요령·작성 요구사항 문서를 파일(PDF·pptx·html·md·txt)로 올리거나 본문을 붙여 넣어 등록합니다', onclick: () => openAddDialog(bookId, changed) }, '＋ 기준 문서')),
     guides.length
       ? guides.map(g => guideRow(bookId, g, { open, changed }))
-      : h('p.muted.guide-empty', '규정이나 작성요령을 등록하세요. 에이전트가 문서에서 장별 작성 지침을 찾아 제안합니다.'));
+      : h('p.muted.guide-empty', '규정이나 작성요령을 등록하세요. 파일을 이 열에 끌어다 놓아도 됩니다. 에이전트가 문서에서 장별 작성 지침을 찾아 제안합니다.'));
+}
+
+// 3열 위에 컴퓨터의 파일을 끌어다 놓으면 그 파일들이 골라진 등록 대화상자를 연다 — 종류·제목은 대화상자에서 정한다 (FR-WB-085).
+// 화면 안의 문장 끌기(dnd.js)는 Files 형식이 없어 받지 않는다. 파일을 열 밖에 놓으면 브라우저가 그 파일로 이동하므로 창 전체에서 막되, 대화상자의 파일 입력란에 놓는 것은 그대로 둔다
+export function acceptGuideDrops(node, { bookId, changed }) {
+  const files = event => event.dataTransfer?.types?.includes('Files') && !event.target.matches?.('input[type=file]');
+  window.addEventListener('dragover', event => { if (files(event)) event.preventDefault(); });
+  window.addEventListener('drop', event => { if (files(event)) event.preventDefault(); });
+  let depth = 0;
+  const leave = () => { depth = 0; node.classList.remove('is-drop-target'); };
+  node.addEventListener('dragenter', event => { if (files(event) && bookId()) { depth++; node.classList.add('is-drop-target'); } });
+  node.addEventListener('dragover', event => { if (files(event) && bookId()) event.dataTransfer.dropEffect = 'copy'; });
+  node.addEventListener('dragleave', event => { if (files(event) && --depth <= 0) leave(); });
+  window.addEventListener('dragend', leave);
+  node.addEventListener('drop', event => {
+    const dropped = event.dataTransfer.files;
+    const id = bookId();
+    leave();
+    if (files(event) && dropped.length && id) openAddDialog(id, changed, dropped);
+  });
 }
 
 function guideRow(bookId, g, { open, changed }) {
@@ -68,10 +88,11 @@ const kindSelect = (value = 'regulation') => h('select', Object.entries(GUIDE_KI
 const field = (label, input) => h('label.field', label, input);
 
 // 파일 여러 개를 골라도 한 요청에 하나씩 올리고 파일마다 성공·실패를 남긴다. 모두 성공하면 닫고, 실패가 있으면 결과를 보여 둔다 (FR-WB-085, ERR-WB-008)
-function openAddDialog(bookId, changed) {
+function openAddDialog(bookId, changed, dropped) {
   const kind = kindSelect();
   const title = h('input', { type: 'text', placeholder: '비우면 파일 이름(또는 첫 제목)을 씁니다' });
   const files = h('input', { type: 'file', multiple: true, accept: ACCEPT });
+  if (dropped) files.files = dropped; // 끌어다 놓은 파일 — 형식은 서버가 가려 사유를 돌려준다 (ERR-WB-008)
   const markdown = h('textarea', { rows: 6, placeholder: '파일 대신 본문을 붙여 넣어도 됩니다 (Markdown)' });
   const results = h('ul.guide-results');
   const submit = h('button.btn', { type: 'submit' }, '등록');
