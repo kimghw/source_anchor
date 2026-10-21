@@ -44,6 +44,7 @@ export function applyServerState(data) {
   state.evidence = data.evidence;
   state.docs = data.docs || [];
   state.custom = data.custom || []; // 이 보고서의 사용자 지정 문서 목록 — 0열 탭 (FR-WB-088)
+  state.forms = data.forms || []; // 이 보고서의 양식 요약 목록 — 0열 「장」 탭의 양식 묶음 (FR-WB-090)
   state.book = data.book || null; // 이 장이 속한 보고서와 그 목차 (FR-WB-073)
   state.instructions = data.instructions || ''; // 이 장의 지시문
   state.anchors = buildAnchorIndex(state.sources);

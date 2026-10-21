@@ -5,7 +5,7 @@ import { effectiveText, hasChildren, REPORT_SECTIONS } from '../shared/instructi
 import { SOURCE_TYPES } from '../shared/model.js';
 import { outlineNumbers } from '../shared/toc.js';
 import { initBookChat, sendBookMessage, setBookView } from './book_chat.js';
-import { guideReader, guidesGroup } from './book_guides.js';
+import { acceptGuideDrops, guideReader, guidesGroup } from './book_guides.js';
 import { collapseButton } from './columns.js';
 import { addChapter, showExplorer } from './explorer.js';
 import { readerDoc } from './reader_doc.js';
@@ -28,6 +28,7 @@ const popups = new Map(); // 떠 있는 원문 창 — 원문마다 하나 (FR-W
 // openChapter · reveal 은 app.js 가 값으로 넘긴다(documents.js 가 book.js 를 import 하므로 여기서 import 하면 순환) — 2열 에이전트 답의 문장 링크가 쓴다 (FR-WB-076)
 export function initBook({ openChapter, reveal }) {
   window.addEventListener('resize', () => { for (const win of popups.values()) placeWindow(win, win.offsetLeft, win.offsetTop); });
+  acceptGuideDrops($('book-sources'), { bookId: () => view.book?.id, changed: refreshBook }); // 3열에 파일을 놓으면 기준 문서 등록 (FR-WB-085)
   initBookChat($('book-chat'), {
     bookChanged: applyBookState,
     reload: () => openBook(view.book.id),
@@ -74,7 +75,9 @@ export function showBookScreen(on) {
   $('book-controls').hidden = !on;
   $('custom-workspace').hidden = true; // 사용자 지정 문서 화면(custom_docs.js)은 두 화면 어느 쪽으로 가든 닫힌다 (FR-WB-088)
   $('custom-controls').hidden = true;
-  document.body.classList.remove('on-custom');
+  $('form-workspace').hidden = true; // 양식 화면(forms.js)도 같다 (FR-WB-090)
+  $('form-controls').hidden = true;
+  document.body.classList.remove('on-custom', 'on-form');
   for (const id of ['summary', 'save-state', 'btn-undo', 'btn-redo', 'btn-export']) $(id).hidden = on;
   document.body.classList.toggle('on-book', on);
   if (!on) closePopups(); // 떠 있는 원문 창은 보고서 화면의 것이다 — 장의 작성 화면에는 다른 장의 원문이 보이지 않는다 (DR-WB-002)
@@ -111,7 +114,7 @@ function render() {
   renderChapters();
   setBookView({ book: view.book, chapters: view.chapters }); // 2열 보고서 에이전트(book_chat.js) — 목차가 바뀌면 안내·수정안 카드를 맞춘다 (FR-WB-076)
   renderSources();
-  showExplorer({ book: view.book, chapters: view.chapters, current: null, custom: view.custom }); // 0열: 보고서가 열려 있다
+  showExplorer({ book: view.book, chapters: view.chapters, current: null, custom: view.custom, forms: view.forms }); // 0열: 보고서가 열려 있다
 }
 
 function renderHead() {

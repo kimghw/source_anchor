@@ -29,7 +29,7 @@ function show(data) {
   applyServerState(data);
   history.replaceState(null, '', `?doc=${encodeURIComponent(data.doc.id)}`);
   showBookScreen(false);
-  showExplorer({ book: state.book, chapters: state.docs, current: state.doc.id, custom: state.custom });
+  showExplorer({ book: state.book, chapters: state.docs, current: state.doc.id, custom: state.custom, forms: state.forms });
   emit('doc-opened');
 }
 

@@ -1,7 +1,8 @@
 // 0열 장 탐색기 — 보고서(뿌리)와 장들을 목차 순서·수준(헤딩 단계)대로 보여 준다. 장을 클릭하면 그 장의 본문(작성 화면)이,
 // 보고서를 클릭하면 보고서 화면이 열린다 (FR-WB-061, 074). 장의 순서(↑↓)·수준(⇤⇥)·추가·삭제도 여기서 한다 (FR-WB-072, 079).
 // "사용자 지정 문서" 탭은 원문들에서 뽑아 만든 문서의 목록이다 — 열기·새로 만들기·삭제 (FR-WB-088).
-// 세 화면이 함께 쓰므로 어느 화면 모듈도 import 하지 않는다 — 화면을 여는 진입점은 app.js 가 넘긴다.
+// "장" 탭의 장 목차 아래에는 양식 묶음을 둔다 — 올리기·열기·삭제 (FR-WB-090).
+// 네 화면이 함께 쓰므로 어느 화면 모듈도 import 하지 않는다 — 화면을 여는 진입점은 app.js 가 넘긴다.
 import { docHeadings } from '../shared/model.js';
 import { canDemote, canMoveDown, canMoveUp, canPromote, moveDown, moveUp, outlineNumbers, shiftLevel } from '../shared/toc.js';
 import { collapseButton } from './columns.js';
@@ -9,9 +10,9 @@ import { api, emit, flushSave, on, state } from './state.js';
 import { fill, formatDate, h, toast } from './util.js';
 
 let root = null;
-let view = { book: null, chapters: [], current: null, custom: [], currentCustom: null }; // current: 열어 둔 장 ID(null 이면 보고서 화면) · currentCustom: 열어 둔 사용자 지정 문서 ID
+let view = { book: null, chapters: [], current: null, custom: [], currentCustom: null, forms: [], currentForm: null }; // current: 열어 둔 장 ID(null 이면 보고서 화면) · currentCustom·currentForm: 열어 둔 사용자 지정 문서·양식 ID
 let tab = 'chapters'; // 0열 탭 — 'chapters' | 'custom' (FR-WB-088)
-const go = { openBook: async () => {}, openChapter: async () => {}, bookChanged: () => {}, reveal: () => {}, openCustom: async () => {}, newCustom: async () => {} };
+const go = { openBook: async () => {}, openChapter: async () => {}, bookChanged: () => {}, reveal: () => {}, openCustom: async () => {}, newCustom: async () => {}, openForm: async () => {}, uploadForm: async () => {} };
 const action = (label, title, enabled, fn) => h('button.icon-btn', { type: 'button', title, disabled: !enabled, onclick: fn }, label);
 const folded = new Set(); // 세부 항목(제목)을 접어 둔 장 ID
 let headingKey = ''; // 열어 둔 장의 제목 목록 — 바뀌었을 때만 다시 그린다
@@ -20,23 +21,25 @@ export function initExplorer(container, handlers) {
   root = container;
   Object.assign(go, handlers);
   // 작성 화면에서 자동 저장이 장 목록(제목·문장 수)을 갱신하면 탐색기도 따라간다
-  on('docs', () => { if (view.current !== null) showExplorer({ book: state.book, chapters: state.docs, current: state.doc.id, custom: state.custom }); });
+  on('docs', () => { if (view.current !== null) showExplorer({ book: state.book, chapters: state.docs, current: state.doc.id, custom: state.custom, forms: state.forms }); });
   // 열어 둔 장에서 제목 블록이 생기거나 바뀌면 세부 항목도 바로 따라간다 (FR-WB-061)
   on('doc', () => { if (view.current !== null && JSON.stringify(docHeadings(state.doc)) !== headingKey) render(); });
   render();
 }
 
 // 화면이 바뀔 때마다 부른다 — chapters 는 서버의 장 목록([{ id, title, level, instructions, sentences, sources, updatedAt }]),
-// custom 은 사용자 지정 문서 요약 목록([{ id, title, picks, registrations, updatedAt }]), currentCustom 은 그 화면에서 열어 둔 문서
-export function showExplorer({ book, chapters, current, custom, currentCustom }) {
-  view = { book, chapters: chapters || [], current: current ?? null, custom: custom || view.custom || [], currentCustom: currentCustom ?? null };
+// custom 은 사용자 지정 문서 요약 목록([{ id, title, picks, registrations, updatedAt }]), currentCustom 은 그 화면에서 열어 둔 문서,
+// forms 는 양식 요약 목록([{ id, title, fileName, format, units, changed, updatedAt }]), currentForm 은 양식 화면에서 열어 둔 양식
+export function showExplorer({ book, chapters, current, custom, currentCustom, forms, currentForm }) {
+  view = { book, chapters: chapters || [], current: current ?? null, custom: custom || view.custom || [], currentCustom: currentCustom ?? null, forms: forms || view.forms || [], currentForm: currentForm ?? null };
   if (view.currentCustom) tab = 'custom';
-  else if (view.current !== null) tab = 'chapters';
+  else if (view.current !== null || view.currentForm) tab = 'chapters';
   render();
 }
 
 // ───────────────────────────── 그리기 ─────────────────────────────
 
+const onBook = () => view.current === null && !view.currentForm; // 보고서 화면(또는 사용자 지정 문서 화면) — 양식 화면도 장은 열려 있지 않다
 const sourceCount = ch => (view.current && ch.id === state.doc.id ? state.sources.length : ch.sources ?? 0);
 
 function render() {
@@ -58,13 +61,54 @@ function render() {
     h('header.col-head', h('div.col-title', h('span.col-index', '0'), '장', h('span.count', String(list.length))), h('div.col-head-actions', collapseButton(root, '0열 장 탐색기'))),
     tabs,
     h('div.tree',
-      h('button.tree-root', { type: 'button', class: view.current === null ? 'is-current' : '', title: '보고서 화면 — 목차·지시문, 기준 문서와 장별 원문', onclick: toBook },
+      h('button.tree-root', { type: 'button', class: onBook() ? 'is-current' : '', title: '보고서 화면 — 목차·지시문, 기준 문서와 장별 원문', onclick: toBook },
         h('span.book-kind', '보고서'),
         h('span.tree-title', view.book?.title || '제목 없는 보고서')),
       list.length
         ? list.map((ch, i) => [row(ch, i, numbers[i]), ...subRows(ch)])
         : h('div.tree-empty', h('p', '이 보고서에는 아직 장이 없습니다.'), h('p.muted', '아래에서 장을 추가하거나, 보고서 화면의 에이전트에게 목차를 요청하세요.')),
-      h('div.tree-add', h('button.btn.small', { type: 'button', onclick: addChapter }, '＋ 장 추가'))));
+      h('div.tree-add', h('button.btn.small', { type: 'button', onclick: addChapter }, '＋ 장 추가')),
+      formsGroup()));
+}
+
+// 양식 묶음 — 올리기(docx·hwpx)·열기·삭제. 양식 화면은 forms.js (FR-WB-090)
+function formsGroup() {
+  return h('div.tree-forms',
+    h('h3.tree-group', '양식', h('span.count', String(view.forms.length))),
+    view.forms.map(f => h('div.tree-row.form-row', { class: f.id === view.currentForm ? 'is-current' : '' },
+      h('span.tree-fold.is-empty'),
+      h('button.tree-node', { type: 'button', title: f.id === view.currentForm ? '지금 열어 둔 양식' : `이 양식을 연다\n${f.fileName}`, onclick: () => openForm(f) },
+        h('span.tree-no', f.id),
+        h('span.tree-title', f.title || f.fileName),
+        h('span.tree-meta', `${f.format} · 단위 ${f.units ?? 0} · 바뀐 ${f.changed ?? 0} · ${formatDate(f.updatedAt)}`)),
+      h('div.tree-actions', action('✕', '양식 삭제 — 올린 원본과 적은 값·지침이 함께 지워집니다', true, () => removeForm(f))))),
+    h('div.tree-add', h('button.btn.small', { type: 'button', title: 'docx·hwpx 양식 파일을 올립니다 — 양식 화면에 끌어다 놓아도 됩니다', onclick: pickForm }, '＋ 양식 올리기')));
+}
+
+async function openForm(f) {
+  if (f.id === view.currentForm) return;
+  await go.openForm(view.book?.id, f.id); // forms.js 가 저장·열기·실패 안내를 맡는다
+}
+
+// 파일 고르기 창을 띄우고, 고르면 쓰던 장을 저장한 뒤 올린다 — 형식·크기 검사와 실패 안내는 forms.js
+function pickForm() {
+  const input = h('input', { type: 'file', accept: '.docx,.hwpx', onchange: async () => {
+    const [file] = input.files;
+    if (file && view.book && await leaving()) await go.uploadForm(view.book.id, file);
+  } });
+  input.click();
+}
+
+async function removeForm(f) {
+  if (!confirm(`“${f.title || f.fileName}” 양식을 삭제할까요? 올린 원본과 적은 값·지침이 함께 지워지며 되돌릴 수 없습니다.`)) return;
+  try {
+    const { forms } = await api('DELETE', `/api/books/${encodeURIComponent(view.book.id)}/forms/${encodeURIComponent(f.id)}`);
+    state.forms = view.forms = forms; // 장 화면이 다시 그릴 때 쓰는 목록도 맞춘다
+    if (view.currentForm === f.id || onBook()) return go.openBook(view.book.id); // 보던 양식을 지웠으면 보고서 화면으로, 보고서 화면이면 그 상태를 다시 받는다
+    render();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
 }
 
 // 사용자 지정 문서 목록 — 열기·새로 만들기·삭제. 문서 화면은 custom_docs.js (FR-WB-088)
@@ -160,7 +204,7 @@ async function leaving() {
 }
 
 async function toBook() {
-  if (view.current === null || !(await leaving())) return;
+  if (onBook() || !(await leaving())) return;
   await go.openBook(view.book?.id).catch(err => toast(err.message, 'error'));
 }
 
@@ -194,11 +238,12 @@ async function saveChapters(list) {
 
 // 서버가 돌려준 보고서 상태를 지금 화면에 맞게 반영한다
 function applyToc(data) {
+  if (view.currentForm) return showExplorer({ ...view, book: data.book, chapters: data.chapters, forms: data.forms }); // 양식 화면은 그대로 두고 탐색기만
   if (view.current === null) return go.bookChanged(data); // 보고서 화면은 자기 상태를 바꾸고 다시 그린다 — 그때 탐색기도 다시 그려진다
   state.docs = data.chapters;
   if (state.book) state.book = { ...state.book, title: data.book.title, chapters: data.chapters };
   emit('docs');
-  showExplorer({ book: state.book, chapters: state.docs, current: state.doc.id, custom: state.custom });
+  showExplorer({ book: state.book, chapters: state.docs, current: state.doc.id, custom: state.custom, forms: state.forms });
 }
 
 // 장을 지우면 그 장의 원문도 함께 지워진다 — 먼저 확인을 받는다 (FR-WB-072)

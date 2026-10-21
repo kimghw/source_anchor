@@ -852,6 +852,12 @@ td.src-ro-cell.is-cited { box-shadow: inset 0 -1px 0 var(--accent); }
 .src-ro.is-pickable:hover, td.src-ro-cell.is-pickable:hover { background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
 .src-ro.is-pickable:hover { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 4px; }
 .src-table .pick-table { margin-left: 8px; }
+/* 양식 — 0열 「장」 탭의 양식 묶음과 양식 화면 (FR-WB-090) */
+.tree-forms { margin-top: var(--space-5); padding-top: var(--space-3); border-top: 1px solid var(--line); }
+.tree-group { display: flex; align-items: baseline; gap: 6px; margin: 0 4px 4px; color: var(--ink-2); font-size: var(--text-sm); font-weight: 700; }
+.form-row .tree-no { font-family: var(--mono); font-weight: 600; }
+.form-body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-5); }
+.workspace.is-drop-target { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* 한 문단에 섞인 제목 줄 안내 — 수정안 막대(.blk-sugg)와 같은 모양이되 주의 색 (FR-WB-026) */
 .blk-split { color: var(--warn); }
@@ -863,6 +869,10 @@ td.src-ro-cell.is-cited { box-shadow: inset 0 -1px 0 var(--accent); }
 .capture-btn:hover { filter: none; opacity: 1; }
 .capture-btn.is-busy { opacity: 0.3; pointer-events: none; }
 body.is-capturing .capture-btn { visibility: hidden; }
+/* 캡처 범위 고르기 막 — 틀 클릭·끌기, 화면 전체·취소 (FR-WB-082) */
+.capture-pick { position: fixed; inset: 0; z-index: 60; cursor: crosshair; background: rgb(20 25 40 / 10%); user-select: none; touch-action: none; outline: none; }
+.capture-pick-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); font-size: 12px; white-space: nowrap; cursor: default; }
+.capture-pick-box { position: absolute; border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; }
 
 /* ───────────── 보고서 에이전트의 목차 수정안 (FR-WB-076, ERR-WB-007) ───────────── */
 .toc-item { cursor: default; }

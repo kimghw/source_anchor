@@ -3,7 +3,7 @@ import { allSentences } from '../shared/model.js';
 import { problemText, SENTENCE_TYPES, STATUS } from '../shared/text.js';
 import { applyBookState, initBook, openBook, showBookScreen } from './book.js';
 import { initBranch } from './branch.js';
-import { capture } from './capture.js';
+import { pickCapture } from './capture.js';
 import { initChat } from './chat.js';
 import { initColumns, openRatioDialog } from './columns.js';
 import { initConnections } from './connections.js';
@@ -12,6 +12,7 @@ import { initDocuments, openChapter, openInitialDocument } from './documents.js'
 import { initEditor, revealSentences } from './editor.js';
 import { initEvidence } from './evidence.js';
 import { initExplorer } from './explorer.js';
+import { initForms, openForm, uploadForm } from './forms.js';
 import { initPanelNav } from './panel_nav.js';
 import { initSources } from './sources.js';
 import { api, canRedo, canUndo, check, on, redo, selectDoc, state, undo } from './state.js';
@@ -28,10 +29,11 @@ initDocuments($('doc-controls'));
 // 장을 여는 진입점은 값으로 넘겨 순환 import 를 만들지 않는다 — 보고서 화면(에이전트 답의 문장 링크)과 0열 장 탐색기가 쓴다 (FR-WB-061, 074, 076, 079)
 const reveal = id => { selectDoc(id); revealSentences([id]); };
 initBook({ openChapter, reveal });
-initExplorer($('explorer'), { openChapter, openBook: id => openBook(id), bookChanged: applyBookState, reveal, openCustom: openCustomDoc, newCustom: newCustomDoc });
+initExplorer($('explorer'), { openChapter, openBook: id => openBook(id), bookChanged: applyBookState, reveal, openCustom: openCustomDoc, newCustom: newCustomDoc, openForm, uploadForm });
 initCustomDocs({ openBook: id => openBook(id) }); // 사용자 지정 문서 화면 — 0열 탭에서 연다 (FR-WB-088)
+initForms({ openBook: id => openBook(id), openChapter }); // 양식 화면 — 0열 「장」 탭의 양식 묶음에서 연다 (FR-WB-090)
 initConnections($('topbar-connections'));
-initColumns(['explorer', 'col-editor', 'col-chat', 'col-sources', 'book-chapters', 'book-chat', 'book-sources', 'custom-editor', 'custom-side', 'custom-sources'].map($)); // 열 너비·접기·비율 — 머리줄이 그려진 뒤 저장한 상태를 되돌린다 (FR-WB-083, 084)
+initColumns(['explorer', 'col-editor', 'col-chat', 'col-sources', 'book-chapters', 'book-chat', 'book-sources', 'custom-editor', 'custom-side', 'custom-sources', 'form-editor', 'form-chat', 'form-sources'].map($)); // 열 너비·접기·비율 — 머리줄이 그려진 뒤 저장한 상태를 되돌린다 (FR-WB-083, 084)
 initPanelNav();
 
 on('doc', renderSummary);
@@ -45,7 +47,7 @@ on('save', () => {
 $('btn-undo').addEventListener('click', undo);
 $('btn-redo').addEventListener('click', redo);
 $('btn-export').addEventListener('click', exportMarkdown);
-$('btn-capture').addEventListener('click', event => capture('화면 전체', event.currentTarget)); // 화면 전체 캡처 — 두 화면에서 늘 보인다 (FR-WB-082)
+$('btn-capture').addEventListener('click', event => pickCapture(event.currentTarget)); // 틀·화면 전체 캡처 — 두 화면에서 늘 보인다 (FR-WB-082)
 $('btn-ratio').addEventListener('click', openRatioDialog); // 열 비율 제안 — 두 화면에서 늘 보인다 (FR-WB-084)
 
 window.addEventListener('keydown', event => {
@@ -58,7 +60,8 @@ window.addEventListener('keydown', event => {
 // 주소가 가리키는 화면을 연다. 주소에 아무것도 없으면 마지막으로 보던 화면으로 간다 (FR-WB-074, ERR-WB-005).
 try {
   const params = new URLSearchParams(location.search);
-  if (params.get('custom')) await openCustomDoc(params.get('report') || undefined, params.get('custom'));
+  if (params.get('form')) await openForm(params.get('report') || undefined, params.get('form'));
+  else if (params.get('custom')) await openCustomDoc(params.get('report') || undefined, params.get('custom'));
   else if (params.get('report')) await openBook(params.get('report'));
   else if (params.get('doc')) await openInitialDocument();
   else {

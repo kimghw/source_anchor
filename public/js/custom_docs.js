@@ -77,11 +77,13 @@ function showCustomScreen(on) {
   $('workspace').hidden = true;
   $('book-workspace').hidden = true;
   $('custom-workspace').hidden = !on;
+  $('form-workspace').hidden = true; // 양식 화면(forms.js)
   $('doc-controls').hidden = true;
   $('book-controls').hidden = true;
   $('custom-controls').hidden = !on;
+  $('form-controls').hidden = true;
   for (const id of ['summary', 'save-state', 'btn-undo', 'btn-redo', 'btn-export']) $(id).hidden = true;
-  document.body.classList.remove('on-book');
+  document.body.classList.remove('on-book', 'on-form');
   document.body.classList.toggle('on-custom', on);
 }
 
@@ -95,7 +97,7 @@ async function saveNow() {
     book.custom = res.custom;
     saveState.textContent = '저장됨';
     saveState.classList.remove('is-error');
-    showExplorer({ book: book.book, chapters: book.chapters, current: null, custom: book.custom, currentCustom: doc.id });
+    showExplorer({ book: book.book, chapters: book.chapters, current: null, custom: book.custom, forms: book.forms, currentCustom: doc.id });
   } catch (err) {
     saveState.textContent = '저장 실패';
     saveState.classList.add('is-error');
@@ -115,7 +117,7 @@ function render() {
   renderEditor();
   renderSide();
   renderSources();
-  showExplorer({ book: book.book, chapters: book.chapters, current: null, custom: book.custom, currentCustom: doc.id });
+  showExplorer({ book: book.book, chapters: book.chapters, current: null, custom: book.custom, forms: book.forms, currentCustom: doc.id });
 }
 
 function renderHead() {
@@ -213,7 +215,7 @@ async function register(chapterId) {
     book = await api('GET', `/api/book?report=${encodeURIComponent(bookId)}`);
     renderSide();
     renderSources();
-    showExplorer({ book: book.book, chapters: book.chapters, current: null, custom: book.custom, currentCustom: doc.id });
+    showExplorer({ book: book.book, chapters: book.chapters, current: null, custom: book.custom, forms: book.forms, currentCustom: doc.id });
   } catch (err) {
     toast(err.message, 'error');
   }
