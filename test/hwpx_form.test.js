@@ -132,7 +132,18 @@ test('fillHwpx: 없는 문단·표를 품은 문단은 필드가 아니다', () 
   assert.throws(() => fillHwpx(bodyDoc, [{ unit: { kind: 'field', section: 0, p: 3 }, text: 'x' }]), /문단을 찾지 못했습니다: p3/);
 });
 
-test('문서 설정(secPr·ctrl)이 든 문단은 잠긴다 — 바꾸기는 거절, 뒤에 끼우기는 그 문단을 남긴다', () => {
+test('누름틀(ctrl 안 fieldBegin)만 든 문단은 채울 수 있고 필드 있음을 알린다', () => {
+  const field = '<hp:p paraPrIDRef="3"><hp:run charPrIDRef="1"><hp:ctrl><hp:fieldBegin id="1" type="CLICK_HERE"/></hp:ctrl></hp:run><hp:run charPrIDRef="1"><hp:t>이름</hp:t></hp:run><hp:run charPrIDRef="1"><hp:ctrl><hp:fieldEnd beginIDRef="1"/></hp:ctrl></hp:run></hp:p>';
+  const both = cellXml({ r: 0, c: 0, text: '칸' }).replace('</hp:run>', '</hp:run><hp:run charPrIDRef="1"><hp:pic id="5"/><hp:ctrl><hp:fieldBegin id="2" type="CLICK_HERE"/></hp:ctrl></hp:run>');
+  const data = hwpxOf([secOf(`${field}${tablePara([[both]])}`)]);
+  const [para, tbl] = scanHwpx(data).items;
+  assert.deepEqual(para, { kind: 'paragraph', section: 0, p: 0, text: '이름', hints: {}, note: '필드 있음' });
+  assert.equal(tbl.rows[0].cells[0].note, '그리기 개체 있음 · 필드 있음');
+  const filled = fillHwpx(data, [{ unit: { kind: 'field', section: 0, p: 0 }, text: '홍길동' }]);
+  assert.equal(scanHwpx(filled).items[0].text, '홍길동');
+});
+
+test('문서 설정(secPr·colPr 를 품은 ctrl)이 든 문단은 잠긴다 — 바꾸기는 거절, 뒤에 끼우기는 그 문단을 남긴다', () => {
   const head = '<hp:p id="0" paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="1"><hp:secPr id="" textDirection="HORIZONTAL"/></hp:run><hp:run charPrIDRef="1"><hp:t>머리글</hp:t></hp:run></hp:p>';
   const cols = '<hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:ctrl><hp:colPr id="" type="NEWSPAPER" colCount="1"/></hp:ctrl><hp:t>단</hp:t></hp:run></hp:p>';
   const data = hwpxOf([secOf(`${head}${cols}${bodyPara('본문')}`)]);
