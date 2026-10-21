@@ -44,3 +44,17 @@ test('escape/unescape', () => {
   assert.equal(escapeXml('a & <b> "c"'), 'a &amp; &lt;b&gt; "c"');
   assert.equal(unescapeXml('&lt;&amp;&#65;&#x41;&quot;&apos;'), '<&AA"\'');
 });
+
+test('innerSpan: 닫는 태그 바로 뒤에 상위 닫는 태그가 와도 자기 닫는 태그 앞까지', () => {
+  const xml = '<hs:sec><hp:p><hp:run><hp:tbl><hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:tbl><hp:tr><hp:tc/></hp:tr></hp:tbl></hp:run></hp:p></hp:subList></hp:tc></hp:tr></hp:tbl></hp:run></hp:p><ns0:p/></hs:sec>';
+  const [tbl] = elementSpans(xml, 'tbl');
+  const tblIn = innerSpan(xml, tbl);
+  assert.equal(xml.slice(tblIn.start, tblIn.end), '<hp:tr><hp:tc><hp:subList><hp:p><hp:run><hp:tbl><hp:tr><hp:tc/></hp:tr></hp:tbl></hp:run></hp:p></hp:subList></hp:tc></hp:tr>');
+  const [tc] = elementSpans(xml, 'tc', tblIn);
+  const tcIn = innerSpan(xml, tc);
+  assert.equal(xml.slice(tcIn.start, tcIn.end), '<hp:subList><hp:p><hp:run><hp:tbl><hp:tr><hp:tc/></hp:tr></hp:tbl></hp:run></hp:p></hp:subList>');
+  const small = '<a:x><w:p><w:r/></w:p></a:x>';
+  const [p] = elementSpans(small, 'p');
+  const pIn = innerSpan(small, p);
+  assert.equal(small.slice(pIn.start, pIn.end), '<w:r/>');
+});

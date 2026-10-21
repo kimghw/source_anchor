@@ -31,3 +31,7 @@ test('classify: 제목 스타일·번호 깊이·수준 상한', () => {
   assert.deepEqual(classify('글', { style: 'Heading9' }), { kind: 'heading', level: 3 });
   assert.deepEqual(classify('본문 문장입니다.', { ilvl: 5 }), { kind: 'field', level: 3 });
 });
+
+test('classify: outlineLvl 9 는 본문', () => {
+  assert.deepEqual(classify('본문', { outlineLvl: 9 }), { kind: 'field', level: 1 });
+});
