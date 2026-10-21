@@ -31,7 +31,7 @@ const reveal = id => { selectDoc(id); revealSentences([id]); };
 initBook({ openChapter, reveal });
 initExplorer($('explorer'), { openChapter, openBook: id => openBook(id), bookChanged: applyBookState, reveal, openCustom: openCustomDoc, newCustom: newCustomDoc, openForm, uploadForm, flushForm: flushFormSave });
 initCustomDocs({ openBook: id => openBook(id) }); // 사용자 지정 문서 화면 — 0열 탭에서 연다 (FR-WB-088)
-initForms({ openBook: id => openBook(id), openChapter }); // 양식 화면 — 0열 「장」 탭의 양식 묶음에서 연다 (FR-WB-090)
+initForms({ openBook: id => openBook(id), openChapter, reveal }); // 양식 화면 — 0열 「장」 탭의 양식 묶음에서 연다 (FR-WB-090). openChapter·reveal 은 2열 에이전트 답의 장·문장 링크가 쓴다 (FR-WB-091)
 initConnections($('topbar-connections'));
 initColumns(['explorer', 'col-editor', 'col-chat', 'col-sources', 'book-chapters', 'book-chat', 'book-sources', 'custom-editor', 'custom-side', 'custom-sources', 'form-editor', 'form-chat', 'form-sources'].map($)); // 열 너비·접기·비율 — 머리줄이 그려진 뒤 저장한 상태를 되돌린다 (FR-WB-083, 084)
 initPanelNav();

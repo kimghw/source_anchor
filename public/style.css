@@ -904,15 +904,16 @@ body.is-capturing .capture-btn { visibility: hidden; }
 .capture-pick-box { position: absolute; border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; }
 
 /* ───────────── 보고서 에이전트의 목차 수정안 (FR-WB-076, ERR-WB-007) ───────────── */
-.toc-item { cursor: default; }
-.toc-item:hover { background: var(--panel); }
-.toc-item .proposal-text { font-size: 13.5px; }
+.toc-item, .form-item { cursor: default; }
+.toc-item:hover, .form-item:hover { background: var(--panel); }
+.toc-item .proposal-text, .form-item .proposal-text { font-size: 13.5px; }
+.form-item .proposal-text { white-space: pre-wrap; } /* 양식 수정안 — 여러 줄 값의 줄 구성을 그대로 (FR-WB-091) */
 .toc-target { margin-bottom: 4px; color: var(--muted); font-size: 12px; }
 .toc-instr { margin-top: 6px; padding: 6px 9px; border-left: 2px solid var(--line-2); font-size: 12.5px; line-height: 1.7; white-space: pre-wrap; }
 .op-badge.toc-add { background: var(--ok-soft); color: var(--ok); }
 .op-badge.toc-rename, .op-badge.toc-instructions, .op-badge.toc-move { background: var(--accent-soft); color: var(--accent-ink); }
 .op-badge.toc-delete { background: var(--bad-soft); color: var(--bad); }
-.toc-item.is-gone, .toc-item.is-stale { background: var(--panel-2); color: var(--ink-2); }
+.toc-item.is-gone, .toc-item.is-stale, .form-item.is-stale { background: var(--panel-2); color: var(--ink-2); }
 .change-decision.is-gone, .change-decision.is-stale { color: var(--bad); }
 /* 지시문 변경 수정안 — 절별 diff, 지시문이 달라진 수정안 (FR-WB-076, ERR-WB-009) */
 .toc-diff-section { margin-top: 6px; }

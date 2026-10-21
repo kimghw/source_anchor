@@ -5,19 +5,21 @@ import { SOURCE_TYPES } from '../shared/model.js';
 import { guideReader, guidesGroup } from './book_guides.js';
 import { collapseButton } from './columns.js';
 import { showExplorer } from './explorer.js';
+import { initFormChat, setFormView } from './form_chat.js';
 import { readerDoc } from './reader_doc.js';
 import { readerPane } from './source_view.js';
-import { api, flushSave } from './state.js';
+import { api, flushSave, state } from './state.js';
 import { debounce, fill, flash, h, toast } from './util.js';
 
 const $ = id => document.getElementById(id);
-const go = { openBook: async () => {}, openChapter: async () => {} }; // openChapter — 에이전트 답의 원문 위치 링크가 쓴다
+const go = { openBook: async () => {}, openChapter: async () => {}, reveal: () => {} }; // openChapter·reveal — 2열 에이전트 답의 장·문장 링크가 쓴다
 const FILE_LIMIT = 5 * 1024 * 1024; // 서버(lib/forms.js FILE_LIMIT)와 같다 — 올리기 전에 먼저 거른다
 let bookId = null;
 let form = null; // 열어 둔 양식 { id, title, fileName, format, nodes, tables, values, instructions, … }
 let book = null; // 보고서 상태 { book, chapters, sources, guides, custom, forms } — 3열·탐색기
 let openSource = null; // 3열에서 열람 중인 원문 (장 ID/원문 번호)
 let openGuide = null; // 3열에서 열람 중인 기준 문서 ID
+let readerHandle = null; // 3열 열람 화면의 부품 — 에이전트 답의 원문 위치 링크가 본문 보기로 돌려 그 자리를 보여 준다
 let units = new Map(); // 번호 → { text(원본 글), locked, note, where(지침 상자 머리줄의 자리) } — 칸과 필드가 같은 단위다
 let guideN = null; // 지침 상자에 열어 둔 번호
 let pending = false; // 아직 서버에 보내지 않은 값·지침·제목 변경이 있다
@@ -35,6 +37,7 @@ export function initForms(handlers) {
     h('span.doc-kind', '양식'),
     h('span.doc-current.form-current'));
   acceptFormDrops($('form-workspace'));
+  initFormChat($('form-chat'), { ...cells, showSource, openChapter: openChapterFromForm, flush: flushFormSave }); // 2열 양식 에이전트 (FR-WB-091)
   window.addEventListener('beforeunload', () => { if (form) save.flush(); });
 }
 
@@ -135,6 +138,7 @@ const explore = () => showExplorer({ book: book.book, chapters: book.chapters, c
 function render() {
   renderHead();
   renderEditor();
+  setFormView({ bookId, form }); // 2열 — 다른 양식이면 새 대화, 같으면 수정안 카드와 1열의 대기 표시를 다시 맞춘다
   renderSources();
   explore();
   setSaveState('저장됨');
@@ -188,21 +192,46 @@ function paint(n, withText) {
   mark(node, n);
 }
 
-// 2열 양식 에이전트(Task 10 form_chat.js)가 handlers 로 받는 손잡이 — initFormChat($('form-chat'), { ...cells, showSource, openChapter }) (FR-WB-091)
+// 2열 양식 에이전트(form_chat.js)가 handlers 로 받는 손잡이 (FR-WB-091). 반영 — 잠긴 단위는 넣지 않고 false (수정안은 대기 그대로)
 function applyValue(n, text) {
+  if (units.get(n)?.locked) {
+    toast('잠긴 단위입니다', 'error');
+    return false;
+  }
   setValue(n, String(text).replace(/\r\n?/g, '\n'));
   paint(n, true);
-  markProposal(n, false);
   queueSave();
+  return true;
 }
 function revealCell(n) {
   const node = unitNode(n);
-  if (!node) return;
+  if (!node) return toast(`#${n} 은 이 양식에 없는 번호입니다.`, 'error');
   node.scrollIntoView({ block: 'center' });
   flash(node, 'is-anchor-flash');
 }
 const markProposal = (n, on) => unitNode(n)?.classList.toggle('has-proposal', on);
-const cells = { cellText, applyValue, revealCell, markProposal }; // 아직 쓰는 곳이 없다 — 2열 에이전트가 붙으면 initForms 에서 넘긴다
+const cells = { cellText, applyValue, revealCell, markProposal };
+
+// 2열 답·카드의 원문 위치 링크 — 3열에서 그 원문을 열고, 위치가 있으면 본문 보기로 돌려 비춘다
+function showSource(chapterId, sourceId, anchorId) {
+  if (!book.sources.some(s => s.chapterId === chapterId && s.id === sourceId)) return toast('이 보고서에 없는 원문입니다.', 'error');
+  openSource = `${chapterId}/${sourceId}`;
+  openGuide = null;
+  renderSources();
+  if (!anchorId) return;
+  readerHandle?.setMode('body');
+  const node = $('form-sources').querySelector(`[data-aid="${CSS.escape(anchorId)}"]`);
+  if (!node) return toast('이 원문에 없는 위치입니다.', 'error');
+  node.scrollIntoView({ block: 'center' });
+  flash(node, 'is-anchor-flash');
+}
+
+// 2열 답의 장·문장 링크 — 양식 저장을 먼저 끝내고(실패하면 옮기지 않는다) 그 장의 작성 화면을 열어 문장을 보여 준다 (ERR-WB-011)
+async function openChapterFromForm(chapterId, sentenceId) {
+  if (!(await flushFormSave())) return;
+  await go.openChapter(chapterId); // documents.js 가 저장·열기·실패 안내를 맡는다
+  if (sentenceId && state.doc?.id === chapterId) go.reveal(sentenceId);
+}
 
 // form.nodes 순서대로 그린다. 필드의 자리 표시는 바로 앞 헤딩
 function formBody() {
@@ -269,6 +298,7 @@ function commit(n, text) {
   setValue(n, text.innerText.replace(/\r\n?/g, '\n').replace(/\n$/, ''));
   paint(n, document.activeElement !== text);
   queueSave();
+  setFormView({ bookId, form }); // 이 단위를 겨눈 수정안은 이제 반영할 수 없다 — 2열 카드를 다시 맞춘다
 }
 
 // ───────────────────────────── 지침 상자 ─────────────────────────────
@@ -386,7 +416,7 @@ async function reload() {
 // 3열 — 작성 기준·원문. 기준 문서 묶음 아래에 장별로 묶은 원문 목록(읽기 전용). 누르면 열 안이 열람 화면으로 바뀐다 (FR-WB-090)
 function renderSources() {
   const source = book.sources.find(s => sourceKey(s) === openSource);
-  if (!source) openSource = null;
+  if (!source) openSource = readerHandle = null;
   const guide = book.guides.find(g => g.id === openGuide);
   if (!guide) openGuide = null;
   fill($('form-sources'),
@@ -413,10 +443,10 @@ function sourceList() {
 }
 
 function reader(source) {
-  const pane = readerPane(source, { docId: source.chapterId, key: 'form', body: () => readerDoc(source) }).pane;
+  readerHandle = readerPane(source, { docId: source.chapterId, key: 'form', body: () => readerDoc(source) });
   return h('div.book-reader',
     h('nav.src-tabs',
       h('button.src-tab.back', { type: 'button', onclick: () => { openSource = null; renderSources(); } }, '← 목록'),
       h('span.book-reader-pos', `${source.chapterId} · ${source.id}`)),
-    pane);
+    readerHandle.pane);
 }
