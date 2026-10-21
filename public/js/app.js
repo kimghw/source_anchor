@@ -12,7 +12,7 @@ import { initDocuments, openChapter, openInitialDocument } from './documents.js'
 import { initEditor, revealSentences } from './editor.js';
 import { initEvidence } from './evidence.js';
 import { initExplorer } from './explorer.js';
-import { initForms, openForm, uploadForm } from './forms.js';
+import { flushFormSave, initForms, openForm, uploadForm } from './forms.js';
 import { initPanelNav } from './panel_nav.js';
 import { initSources } from './sources.js';
 import { api, canRedo, canUndo, check, on, redo, selectDoc, state, undo } from './state.js';
@@ -29,7 +29,7 @@ initDocuments($('doc-controls'));
 // 장을 여는 진입점은 값으로 넘겨 순환 import 를 만들지 않는다 — 보고서 화면(에이전트 답의 문장 링크)과 0열 장 탐색기가 쓴다 (FR-WB-061, 074, 076, 079)
 const reveal = id => { selectDoc(id); revealSentences([id]); };
 initBook({ openChapter, reveal });
-initExplorer($('explorer'), { openChapter, openBook: id => openBook(id), bookChanged: applyBookState, reveal, openCustom: openCustomDoc, newCustom: newCustomDoc, openForm, uploadForm });
+initExplorer($('explorer'), { openChapter, openBook: id => openBook(id), bookChanged: applyBookState, reveal, openCustom: openCustomDoc, newCustom: newCustomDoc, openForm, uploadForm, flushForm: flushFormSave });
 initCustomDocs({ openBook: id => openBook(id) }); // 사용자 지정 문서 화면 — 0열 탭에서 연다 (FR-WB-088)
 initForms({ openBook: id => openBook(id), openChapter }); // 양식 화면 — 0열 「장」 탭의 양식 묶음에서 연다 (FR-WB-090)
 initConnections($('topbar-connections'));

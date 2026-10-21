@@ -47,7 +47,9 @@ export async function openForm(wantedBookId, id) {
   } catch (err) {
     return toast(`저장하지 못해 이동하지 않았습니다: ${err.message}`, 'error');
   }
-  if (!(await save.flush())) return; // 열어 둔 양식의 값·지침을 저장하지 못하면 옮기지 않는다 — 적은 글은 화면에 남는다 (ERR-WB-011)
+  if (!(await flushFormSave())) return; // 열어 둔 양식의 값·지침을 저장하지 못하면 옮기지 않는다 — 적은 글은 화면에 남는다 (ERR-WB-011)
+  save.cancel();
+  pending = false; // 양식 화면 밖에 남은 저장(보던 양식을 지운 뒤 등)은 버린다
   try {
     const state = await api('GET', bookUrl(wantedBookId));
     const { form: loaded } = await api('GET', formsUrl(state.book.id, id));
@@ -99,8 +101,15 @@ function acceptFormDrops(node) {
   });
 }
 
+// 양식 화면을 떠나기 전 — 예약된 저장과 보내는 중인 저장을 끝낸다. 실패하면 false(알림은 저장이 한 번 띄운다). 양식 화면이 아니면 할 일이 없다.
+// 0열 탐색기(explorer.js leaving)는 app.js 가 넘긴 이 함수로 장·보고서·문서로 옮기기 전에 부른다 (ERR-WB-011)
+export async function flushFormSave() {
+  if ($('form-workspace').hidden) return true;
+  return save.flush();
+}
+
 async function leave() {
-  if (!(await save.flush())) return; // 저장하지 못하면 옮기지 않는다 (ERR-WB-011)
+  if (!(await flushFormSave())) return; // 저장하지 못하면 옮기지 않는다 (ERR-WB-011)
   await go.openBook(bookId).catch(err => toast(err.message, 'error'));
 }
 
@@ -315,7 +324,7 @@ const setSaveState = (text, error = false) => {
 
 // 제목·값·지침을 통째로 보낸다. 서버가 원본과 같은 값을 빼고 돌려주므로, 보내는 동안 더 고친 것이 없을 때만 받아 쓴다.
 // 실패하면 적은 글은 화면에 남기고 false — 옮기기 전 저장이 실패하면 옮기지 않는다 (ERR-WB-011)
-async function saveNow() {
+async function putForm() {
   const f = form;
   if (!f || !pending) return true;
   pending = false;
@@ -337,6 +346,9 @@ async function saveNow() {
     return false;
   }
 }
+// 저장은 한 줄로 잇는다 — flush 는 보내는 중인 PUT 이 끝난 뒤에 남은 변경을 보내고 그 결과로 판단한다
+let inflight = Promise.resolve(true);
+const saveNow = () => (inflight = inflight.then(putForm));
 const save = debounce(saveNow, 700);
 function queueSave() {
   pending = true;

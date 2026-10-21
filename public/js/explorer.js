@@ -12,7 +12,7 @@ import { fill, formatDate, h, toast } from './util.js';
 let root = null;
 let view = { book: null, chapters: [], current: null, custom: [], currentCustom: null, forms: [], currentForm: null }; // current: 열어 둔 장 ID(null 이면 보고서 화면) · currentCustom·currentForm: 열어 둔 사용자 지정 문서·양식 ID
 let tab = 'chapters'; // 0열 탭 — 'chapters' | 'custom' (FR-WB-088)
-const go = { openBook: async () => {}, openChapter: async () => {}, bookChanged: () => {}, reveal: () => {}, openCustom: async () => {}, newCustom: async () => {}, openForm: async () => {}, uploadForm: async () => {} };
+const go = { openBook: async () => {}, openChapter: async () => {}, bookChanged: () => {}, reveal: () => {}, openCustom: async () => {}, newCustom: async () => {}, openForm: async () => {}, uploadForm: async () => {}, flushForm: async () => true };
 const action = (label, title, enabled, fn) => h('button.icon-btn', { type: 'button', title, disabled: !enabled, onclick: fn }, label);
 const folded = new Set(); // 세부 항목(제목)을 접어 둔 장 ID
 let headingKey = ''; // 열어 둔 장의 제목 목록 — 바뀌었을 때만 다시 그린다
@@ -184,7 +184,7 @@ function subRows(ch) {
 // 세부 장을 누르면 그 장을 열고(이미 열려 있으면 그대로) 편집기에서 그 제목으로 옮긴다
 async function openHeading(ch, head) {
   if (ch.id !== view.current) {
-    await go.openChapter(ch.id); // documents.js 가 저장·열기·실패 안내를 맡는다
+    await openChapter(ch);
     if (state.doc.id !== ch.id) return; // 저장 실패 등으로 열지 못했다
   }
   go.reveal(head.id);
@@ -192,15 +192,15 @@ async function openHeading(ch, head) {
 
 // ───────────────────────────── 열기 ─────────────────────────────
 
-// 다른 화면으로 가기 전에 쓰던 장을 저장한다 — 저장하지 못하면 옮기지 않는다 (FR-WB-062, ERR-WB-006)
+// 다른 화면으로 가기 전에 쓰던 장을, 양식 화면이면 양식의 값·지침을 저장한다 — 저장하지 못하면 옮기지 않는다 (FR-WB-062, ERR-WB-006, ERR-WB-011)
 async function leaving() {
   try {
     await flushSave();
-    return true;
   } catch (err) {
     toast(`저장하지 못해 이동하지 않았습니다: ${err.message}`, 'error');
     return false;
   }
+  return go.flushForm(); // 실패 알림은 forms.js 가 띄운다
 }
 
 async function toBook() {
@@ -209,8 +209,8 @@ async function toBook() {
 }
 
 async function openChapter(ch) {
-  if (ch.id === view.current) return;
-  await go.openChapter(ch.id); // documents.js 가 저장·열기·실패 안내를 맡는다
+  if (ch.id === view.current || !(await leaving())) return;
+  await go.openChapter(ch.id); // documents.js 가 열기·실패 안내를 맡는다
 }
 
 // 빈 장을 목차 끝에 만들고 곧바로 그 장의 작성 화면으로 연다 (FR-WB-072). 머리줄의 "＋ 새 장"도 이 함수를 쓴다.
@@ -253,7 +253,7 @@ async function removeChapter(ch) {
     const { docs } = await api('DELETE', `/api/reports/${encodeURIComponent(ch.id)}`);
     // 쓰던 장을 지웠으면 같은 보고서의 남은 장으로, 남은 장이 없으면 보고서 화면으로 간다
     if (view.current === ch.id) return docs.length ? go.openChapter(docs[0].id) : go.openBook(view.book.id);
-    if (view.current === null) return go.openBook(view.book.id); // 보고서 화면은 3열 전체 원문도 바뀐다 — 다시 받는다
+    if (view.current === null && await go.flushForm()) return go.openBook(view.book.id); // 보고서 화면은 3열 전체 원문도 바뀐다 — 다시 받는다. 양식 화면에서 양식 저장이 실패하면 머물고 탐색기만 고친다
     state.docs = docs;
     emit('docs');
     showExplorer({ ...view, chapters: docs });
