@@ -18,6 +18,11 @@ test('classify: 헤딩·필드·빈 문단과 수준', () => {
   assert.deepEqual(classify('   '), { kind: 'blank', level: 0 });
 });
 
+test('classify: 요 로 끝나는 명사는 헤딩, 서술 어미는 문장', () => {
+  assert.deepEqual(classify('1. 해주세요'), { kind: 'field', level: 1 });
+  assert.deepEqual(classify('2. 사업 개요 및 필요'), { kind: 'heading', level: 1 });
+});
+
 test('classify: 제목 스타일·번호 깊이·수준 상한', () => {
   assert.deepEqual(classify('글', { style: '제목 3' }), { kind: 'heading', level: 3 });
   assert.deepEqual(classify('글', { style: 'Title' }), { kind: 'heading', level: 1 });
