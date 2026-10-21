@@ -13,14 +13,15 @@ const FILE_LIMIT = 5 * 1024 * 1024; // 서버(lib/guides.js GUIDE_FILE_LIMIT)와
 const guideUrl = (bookId, id = '', file = '') => `/api/books/${encodeURIComponent(bookId)}/guides${id ? `/${encodeURIComponent(id)}` : ''}${file ? `/${file}` : ''}`;
 const kindLabel = kind => GUIDE_KINDS[kind] ?? kind;
 
-// 목록 묶음 — 머리줄(수·추가 버튼)과 문서마다 한 줄(종류·제목·형식·고치기·삭제). 제목을 누르면 3열에서 연다
-export function guidesGroup(bookId, guides, { open, changed }) {
+// 목록 묶음 — 머리줄(수·추가 버튼)과 문서마다 한 줄(종류·제목·형식·고치기·삭제). 제목을 누르면 3열에서 연다.
+// dropHint: false — 이 열에 파일을 놓아도 기준 문서로 올라가지 않는 화면(양식 화면)은 끌어 놓기 안내를 뺀다
+export function guidesGroup(bookId, guides, { open, changed, dropHint = true }) {
   return h('section.book-source-group.guide-group',
     h('h3.book-source-chapter', '기준 문서', h('span.count', String(guides.length)),
       h('button.btn.small', { type: 'button', title: '규정·규칙·작성요령·작성 요구사항 문서를 파일(PDF·pptx·html·md·txt)로 올리거나 본문을 붙여 넣어 등록합니다', onclick: () => openAddDialog(bookId, changed) }, '＋ 기준 문서')),
     guides.length
       ? guides.map(g => guideRow(bookId, g, { open, changed }))
-      : h('p.muted.guide-empty', '규정이나 작성요령을 등록하세요. 파일을 이 열에 끌어다 놓아도 됩니다. 에이전트가 문서에서 장별 작성 지침을 찾아 제안합니다.'));
+      : h('p.muted.guide-empty', `규정이나 작성요령을 등록하세요.${dropHint ? ' 파일을 이 열에 끌어다 놓아도 됩니다.' : ''} 에이전트가 문서에서 장별 작성 지침을 찾아 제안합니다.`));
 }
 
 // 3열 위에 컴퓨터의 파일을 끌어다 놓으면 그 파일들이 골라진 등록 대화상자를 연다 — 종류·제목은 대화상자에서 정한다 (FR-WB-085).

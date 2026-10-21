@@ -858,6 +858,35 @@ td.src-ro-cell.is-cited { box-shadow: inset 0 -1px 0 var(--accent); }
 .form-row .tree-no { font-family: var(--mono); font-weight: 600; }
 .form-body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-5); }
 .workspace.is-drop-target { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 양식 표 — 1열 본문: 헤딩·필드·표, 번호 배지·제자리 편집·지침 상자·내려받기 실패 사유 (FR-WB-090, 092) */
+.form-heading { margin: var(--space-5) 0 var(--space-2); font-size: 15px; font-weight: 700; line-height: 1.5; }
+.form-body > :first-child { margin-top: 0; }
+.form-heading.lvl-1 { font-size: 17px; }
+.form-heading.lvl-3 { color: var(--ink-2); font-size: 14px; }
+.form-field { display: flex; align-items: flex-start; gap: 8px; margin: 2px 0; padding: 4px 6px; font-size: 14px; }
+.form-field.lvl-2 { padding-left: 1.5em; }
+.form-field.lvl-3 { padding-left: 3em; }
+.cell-n { flex: none; min-height: 0; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--muted); font: 600 10.5px/1.6 var(--mono); white-space: nowrap; cursor: pointer; }
+.cell-n:hover, .cell-n:focus-visible { border-color: var(--accent); color: var(--accent-ink); }
+.cell-n.has-guide::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 4px; border-radius: 50%; background: var(--accent); vertical-align: 1px; }
+.has-proposal > .cell-n { box-shadow: 0 0 0 2px var(--warn); }
+.cell-text { flex: 1; min-width: 0; min-height: 1.6em; padding: 1px 4px; border-radius: 4px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.cell-text:focus { outline: 2px solid var(--accent); outline-offset: 1px; background: var(--panel); }
+.form-field .cell-text:empty::before { content: "(비어 있음 — 눌러서 쓰기)"; color: var(--muted); }
+.form-field.is-changed, .form-cell.is-changed { box-shadow: inset 3px 0 0 var(--accent); }
+.is-locked { background: var(--panel-2); }
+.is-locked .cell-text { color: var(--muted); cursor: not-allowed; }
+.form-table { margin: var(--space-4) 0; }
+.form-table .table-wrap { border: 0; border-radius: 0; }
+.form-grid { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 13px; }
+.form-grid:has(> colgroup) { table-layout: fixed; }
+td.form-cell { position: relative; vertical-align: top; padding: 20px 8px 6px; border: 1px solid var(--line-2); }
+td.form-cell .cell-n { position: absolute; top: 3px; left: 4px; }
+.cell-guide { display: grid; gap: var(--space-2); flex: none; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--panel-2); }
+.cell-guide .field { margin: 0; }
+.cell-guide .row-actions { margin: 0; }
+.cell-guide-head { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+.form-export-error { flex: none; margin: var(--space-2) var(--space-4) 0; padding: 6px 10px; border-radius: var(--radius-md); background: var(--bad-soft); color: var(--bad); font-size: 12.5px; line-height: 1.6; }
 
 /* 한 문단에 섞인 제목 줄 안내 — 수정안 막대(.blk-sugg)와 같은 모양이되 주의 색 (FR-WB-026) */
 .blk-split { color: var(--warn); }
