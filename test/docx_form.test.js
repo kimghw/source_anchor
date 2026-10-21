@@ -108,6 +108,14 @@ test('fillDocx: 없는 칸·없는 문단·같은 자리 두 번', () => {
   assert.throws(() => fillDocx(doc, [twice, twice]), Error);
 });
 
+test('구역 설정(pPr 안 sectPr)이 든 문단은 잠긴다', () => {
+  const data = docxOf(`${heading}<w:p><w:pPr><w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr></w:pPr></w:p>`);
+  const { items } = scanDocx(data);
+  assert.deepEqual(items[1], { kind: 'paragraph', section: 0, p: 1, text: '', hints: { style: null, outlineLvl: null, ilvl: null }, locked: '구역 설정' });
+  assert.equal(items[0].locked, undefined);
+  assert.throws(() => fillDocx(data, [{ unit: { kind: 'field', section: 0, p: 1 }, text: 'x' }]), /잠긴 문단입니다: p1/);
+});
+
 test('scanDocx: document.xml 없음', () => {
   const zip = writeZip(emptyZip(), { '[Content_Types].xml': '<Types/>' });
   assert.throws(() => scanDocx(zip), err => err.format === true && /format|Word/.test(err.message));

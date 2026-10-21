@@ -132,6 +132,20 @@ test('fillHwpx: 없는 문단·표를 품은 문단은 필드가 아니다', () 
   assert.throws(() => fillHwpx(bodyDoc, [{ unit: { kind: 'field', section: 0, p: 3 }, text: 'x' }]), /문단을 찾지 못했습니다: p3/);
 });
 
+test('문서 설정(secPr·ctrl)이 든 문단은 잠긴다 — 바꾸기는 거절, 뒤에 끼우기는 그 문단을 남긴다', () => {
+  const head = '<hp:p id="0" paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="1"><hp:secPr id="" textDirection="HORIZONTAL"/></hp:run><hp:run charPrIDRef="1"><hp:t>머리글</hp:t></hp:run></hp:p>';
+  const cols = '<hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:ctrl><hp:colPr id="" type="NEWSPAPER" colCount="1"/></hp:ctrl><hp:t>단</hp:t></hp:run></hp:p>';
+  const data = hwpxOf([secOf(`${head}${cols}${bodyPara('본문')}`)]);
+  const { items } = scanHwpx(data);
+  assert.deepEqual(items[0], { kind: 'paragraph', section: 0, p: 0, text: '머리글', hints: {}, locked: '문서 설정' });
+  assert.equal(items[1].locked, '문서 설정');
+  assert.equal(items[2].locked, undefined);
+  assert.throws(() => fillHwpx(data, [{ unit: { kind: 'field', section: 0, p: 0 }, text: 'x' }]), /잠긴 문단입니다: p0/);
+  assert.throws(() => fillHwpx(data, [{ unit: { kind: 'field', section: 0, p: 1 }, text: 'x' }]), /잠긴 문단/);
+  const after = sectionOf(fillHwpx(data, [{ unit: { kind: 'field', section: 0, p: 0, after: true }, text: '뒤' }]));
+  assert.ok(after.includes(`${head}<hp:p paraPrIDRef="0" styleIDRef="0"><hp:run charPrIDRef="0"><hp:t>뒤</hp:t></hp:run></hp:p>`));
+});
+
 test('fillHwpx: 서식 승계·여러 줄 위치 대응·자기 닫힘 run·CRLF·이스케이프', () => {
   const filled = fillHwpx(doc, [
     { unit: { kind: 'cell', t: 0, r: 1, c: 1 }, text: 'a\r\nb\nc' },
