@@ -659,7 +659,8 @@ const FORM_ONLY = '양식 수정안은 양식 화면의 에이전트만 냅니�
 
 // 양식 화면의 한 턴 — 양식 전체(매번)와 보고서 전체 원문 목록을 주고, 답 끝의 칸·필드 값 제안을 검사해 화면에 보낸다. 자료 수집·문장·목차 수정안은 받지 않는다
 async function formTurn(conv, modelKey, text, bookId, formId, emit) {
-  const { form, book } = await host.formAgentState(bookId, formId);
+  const { form: live, book } = await host.formAgentState(bookId, formId);
+  const form = structuredClone(live); // 턴 시작의 양식 — 답하는 동안 작성자가 고친 칸은 수정안의 before 와 달라져 카드가 반영을 막는다
   if (DISABLED || !cliAvailable(MODELS[modelKey].cli)) {
     emit({ t: 'notice', text: `${DISABLED ? 'AGENT=off 로 에이전트가 꺼져 있어' : `${MODELS[modelKey].cli} CLI 를 찾지 못해`} 양식 화면에서는 에이전트를 쓸 수 없습니다.` });
     return;

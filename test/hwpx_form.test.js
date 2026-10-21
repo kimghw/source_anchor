@@ -159,6 +159,13 @@ test('fillHwpx: 빈 줄은 그 자리 문단(스페이서) 서식, 글 있는 �
   assert.ok(xml.includes(`vertAlign="CENTER">${p(200, 7, 1, 'A')}${p(202, 9, 3, 'B')}</hp:subList>`));
 });
 
+test('fillHwpx: 여러 줄 값의 쪽·단 나눔은 첫 줄 문단에만', () => {
+  const field = '<hp:p id="5" paraPrIDRef="3" styleIDRef="0" pageBreak="1" columnBreak="1" merged="0"><hp:run charPrIDRef="5"><hp:t>옛 글</hp:t></hp:run></hp:p>';
+  const xml = sectionOf(fillHwpx(hwpxOf([secOf(`${field}${tablePara(rowsOf())}`)]), [{ unit: { kind: 'field', section: 0, p: 0 }, text: '하나\n둘\n셋' }]));
+  const line = (pb, t) => `<hp:p id="5" paraPrIDRef="3" styleIDRef="0" pageBreak="${pb}" columnBreak="${pb}" merged="0"><hp:run charPrIDRef="5"><hp:t>${t}</hp:t></hp:run></hp:p>`;
+  assert.ok(xml.includes(`${line(1, '하나')}${line(0, '둘')}${line(0, '셋')}`));
+});
+
 test('fillHwpx: 문단 없는 칸', () => {
   const data = hwpxOf([sectionXml([[cellXml({ r: 0, c: 0, paras: [] })]])]);
   const filled = fillHwpx(data, [{ unit: { kind: 'cell', t: 0, r: 0, c: 0 }, text: 'v' }]);

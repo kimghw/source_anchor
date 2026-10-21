@@ -38,7 +38,11 @@ export function initForms(handlers) {
     h('span.doc-current.form-current'));
   acceptFormDrops($('form-workspace'));
   initFormChat($('form-chat'), { ...cells, showSource, openChapter: openChapterFromForm, flush: flushFormSave }); // 2열 양식 에이전트 (FR-WB-091)
-  window.addEventListener('beforeunload', () => { if (form) save.flush(); });
+  window.addEventListener('beforeunload', () => {
+    if (!form) return;
+    document.activeElement?.closest('.cell-text')?.blur(); // 편집 중인 칸을 먼저 확정한다 — 확정 전 글은 아직 저장 대상이 아니다
+    save.flush();
+  });
 }
 
 // ───────────────────────────── 열기 · 올리기 · 떠나기 ─────────────────────────────

@@ -195,6 +195,44 @@ test('exportForm 확인: 저장한 구조와 결과가 다르면 409 — 단위 
   assert.throws(() => exportForm(cell, original), status(409, /— #8: 기대 "T0 r2 c2" 실제 "T0 r2 c1"$/));
 });
 
+const FORBIDDEN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/;
+test('값의 XML 1.0 금지 글자는 저장·내보내기에서 빠지고 짝 없는 서로게이트는 U+FFFD 가 된다 — 내보낸 XML 에 남지 않는다', async () => {
+  for (const [data, fileName, member] of [[tableDocx, '회의록.docx', 'word/document.xml'], [hwpxDoc, '조서.hwpx', 'Contents/section0.xml']]) {
+    const { form, original } = await build(data, fileName);
+    applyFormPatch(form, { values: { 3: 'soft\u0002hyphen\u000bvt\tend\uFFFF', 6: 'a\uD800b' } });
+    assert.deepEqual(form.values, { 3: 'softhyphenvt\tend', 6: 'a\uFFFDb' });
+    form.values[3] = 'old\u0001value'; // 고치기 전에 저장한 값도 내보낼 때 거른다
+    const xml = readZip(exportForm(form, original).data).read(member).toString('utf8');
+    assert.doesNotMatch(xml, FORBIDDEN);
+    assert.ok(xml.includes('oldvalue') && xml.includes('a\uFFFDb'));
+  }
+});
+
+test('exportForm: 칸 문단을 감싼 customXml 처럼 기입이 XML 짝을 깨면 파일을 내주지 않고 409', async () => {
+  const wrapped = docxOf(`<w:tbl><w:tr><w:tc><w:tcPr/><w:customXml w:element="x"><w:p><w:r><w:t>가</w:t></w:r></w:p></w:customXml><w:p><w:r><w:t>나</w:t></w:r></w:p></w:tc></w:tr></w:tbl>`);
+  const { form, original } = await build(wrapped);
+  assert.equal(cells(form)[0].text, '가\n나');
+  applyFormPatch(form, { values: { 1: '새 값' } });
+  assert.throws(() => exportForm(form, original), status(409, /^기입 결과의 XML 구조가 어긋났습니다$/));
+});
+
+test('exportForm: 2,000칸 표에 값 1,000개 — 값마다 표를 다시 훑지 않는다 (docx·hwpx)', async () => {
+  const docx = docxOf(`<w:tbl>${Array.from({ length: 200 }, (_, r) => `<w:tr>${Array.from({ length: 10 }, (_, c) => `<w:tc><w:p><w:r><w:t>r${r}c${c}</w:t></w:r></w:p></w:tc>`).join('')}</w:tr>`).join('')}</w:tbl>`);
+  const hwpx = hwpxOf([sectionXml(Array.from({ length: 200 }, (_, r) => Array.from({ length: 10 }, (_, c) => cellXml({ r, c, text: `r${r}c${c}` }))))]);
+  for (const [data, fileName, scan] of [[docx, '큰.docx', scanDocx], [hwpx, '큰.hwpx', scanHwpx]]) {
+    const { form, original } = await build(data, fileName);
+    const ns = cells(form).map(x => x.n).filter(n => n % 2);
+    assert.equal(ns.length, 1000);
+    applyFormPatch(form, { values: Object.fromEntries(ns.map(n => [n, `값 ${n}\n둘째`])) });
+    const t0 = performance.now();
+    const out = exportForm(form, original);
+    const ms = performance.now() - t0;
+    assert.ok(ms < 3000, `${fileName}: ${Math.round(ms)}ms`); // 이 기계 수십 ms — 값마다 다시 훑으면 hwpx 는 9초 넘게 걸렸다
+    const got = scan(out.data).items.find(i => i.kind === 'table').rows.flatMap(row => row.cells);
+    assert.equal(got.filter(x => x.text.endsWith('\n둘째')).length, 1000);
+  }
+});
+
 test('파일: 원본·json 쓰기 → 읽기 → 다시 쓰기 → 지우기', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sourceanchor-forms-test-'));
   try {

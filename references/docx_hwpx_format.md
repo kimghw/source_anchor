@@ -11,6 +11,13 @@
 - 토큰 정규식은 `</?접두사:(tbl|tr|tc|p)(?=[\s/>])` 처럼 뒤를 확인해야 `tcPr`·`tblPr` 를
   셀·표로 잘못 잡지 않는다. 깊이를 세어 최상위 요소만 고른다 — 셀 안에 표가 또 있다.
 - 텍스트 노드 이스케이프는 `& < >` 세 개면 된다(속성에 넣지 않는다).
+- XML 1.0 은 TAB(U+0009)·LF(U+000A)·CR(U+000D)을 뺀 C0 제어 문자(U+0000–U+001F)와 비문자
+  U+FFFE·U+FFFF 를 허용하지 않는다 — 이스케이프로도(`&#2;`) 안 된다. 이런 글자가 든 파일은
+  Word 가 "읽을 수 없는 내용"으로 알리고 한글은 열지 않는다. PDF·Word 에서 복사한 글에
+  U+0002·U+000B(세로 탭) 같은 글자가 섞여 오므로 써 넣기 전에 빼야 한다. 짝 없는 서로게이트
+  (U+D800–U+DFFF 단독)는 UTF-8 로 인코딩되지 않아 U+FFFD 로 바뀐다.
+- 문단 하나를 여러 문단으로 나눠 쓸 때 원래 문단의 서식(docx `w:pPr`, hwpx `<hp:p>` 여는 태그)을
+  그대로 되풀이하면 그 안의 쪽·단 나눔도 문단마다 되풀이된다(아래 각 형식의 해당 항목).
 
 ## ZIP 컨테이너
 
@@ -52,6 +59,12 @@
 - 구역(섹션) 설정 `<w:sectPr>` 는 그 구역의 **마지막 문단** `<w:pPr>` 안에 들어 있다(문서 맨 끝 구역만 `w:body` 의 마지막 자식). 이 문단의 `w:pPr` 를 버리면 쪽 설정·머리말 연결이 사라진다.
 - 변경 추적이 켜진 문서에서는 `w:rPr` 안에 `<w:rPrChange>`, `w:pPr` 안에 `<w:pPrChange>` 가 오고, 그 안에 **이전 서식의 `w:rPr`/`w:pPr` 가 또 들어 있다** — 같은 이름 중첩이라 첫 닫는 태그에서 끊으면 서식 구간을 잘못 자른다(깊이를 센다).
 - 상용 양식(AIP 신청서)은 인라인 `w:sdt` 가 런을 감싸기도 한다(블록이 아니라 칸 글 안).
+- 블록 수준에서 문단을 감쌀 수 있는 요소는 `w:sdt` 와 `w:customXml` 이다. 칸의 첫 문단만
+  `<w:customXml>` 안에 있을 때 첫 문단~마지막 문단 구간을 바꾸면 닫는 태그만 사라져 깨진 XML 이 된다.
+- 앞 쪽 나눔은 `w:pPr` 안 `<w:pageBreakBefore/>`(`w:val="0"` 이면 끔 — 스타일의 쪽 나눔을 문단에서
+  끌 때 쓴다). 각주·미주·메모의 참조 표시는 런 안의 `<w:footnoteReference w:id=…/>`·
+  `<w:endnoteReference/>`·`<w:commentReference/>` 이고 본문은 `footnotes.xml`·`endnotes.xml`·
+  `comments.xml` 에 있다 — 런을 새로 쓰면 참조 표시가 사라진다.
 
 ## HWPX (`Contents/section<n>.xml`, `Contents/header.xml`)
 
@@ -75,6 +88,7 @@
 - 그리기 개체(`hp:pic`·`hp:rect`·`hp:container`) 안에도 `subList`/`p` 가 중첩되고, 칸 안에 표가
   또 올 수 있다(중첩 표). 같은 이름 중첩 깊이를 세어 최상위 것만 고른다.
 - 여러 줄 값을 문단 여러 개로 쓸 때 같은 `id` 속성이 반복돼도 한글이 연다(확인됨).
+- 쪽·단 나눔은 문단 여는 태그의 속성 `pageBreak="1"`·`columnBreak="1"` 이다(없거나 `"0"` 이면 나누지 않는다).
 - 문단 안 컨트롤은 `<hp:run><hp:ctrl>…</hp:ctrl></hp:run>` 로 온다. `ctrl` 의 자식이 `colPr`(단 설정)·`header`·`footer`·`footNote`·`endNote`·`pageNum`·`pageHiding`·`newNum` 이면 문서 설정이나 머리말·각주 내용이라 그 문단을 새로 쓰면 사라진다. `fieldBegin`/`fieldEnd` 는 필드의 시작·끝이고 종류는 `type` 속성이 정한다(누름틀은 `type="CLICK_HERE"`, 하이퍼링크·날짜 등도 같은 요소). `bookmark`·`indexMark`·`autoNum` 은 문서 구조를 바꾸지 않는 표시·자동 번호다. `hiddenComment` 는 숨은 설명 안에 `subList`/`p` 를 품는다.
 - 섹션의 **첫 문단**은 보통 `<hp:run><hp:secPr …>…</hp:secPr><hp:ctrl><hp:colPr …/></hp:ctrl></hp:run>` 처럼 쪽 설정(`secPr`)과 단 설정(`colPr`)을 함께 품는다 — 본문 첫 줄처럼 보여도 문서 설정 문단이다.
 - 열 그리드가 없으므로 열 폭은 `cellSz width` 로 구한다: 행마다 왼쪽 경계(0)에서 칸 폭을 더해 열 경계를 모으면 병합 칸 사이의 경계도 다른 행에서 풀린다. `colSpan` 1 칸만으로는 기술수요조사서.hwpx 의 11열 중 7열이 풀리지 않았다.

@@ -89,6 +89,21 @@ test('fillDocx: 문단 표시 rPr 폴백·중첩 rPr 통째 승계', () => {
   assert.ok(xml.includes('<w:p><w:r><w:rPr><w:b/><w:rPrChange w:id="1"><w:rPr><w:i/></w:rPr></w:rPrChange></w:rPr><w:t xml:space="preserve">셋</w:t></w:r></w:p>'));
 });
 
+test('fillDocx: 여러 줄 값의 앞 쪽 나눔은 첫 문단에만 — 둘째 줄부터는 그 자리에서 끈다', () => {
+  const data = docxOf(`<w:p><w:pPr><w:keepNext/><w:pageBreakBefore/><w:jc w:val="left"/></w:pPr><w:r><w:t>옛 글</w:t></w:r></w:p>${table}`);
+  const xml = documentOf(fillDocx(data, [{ unit: { kind: 'field', section: 0, p: 0 }, text: '하나\n둘\n셋' }]));
+  const off = '<w:pPr><w:keepNext/><w:pageBreakBefore w:val="0"/><w:jc w:val="left"/></w:pPr>';
+  assert.ok(xml.includes(`<w:p><w:pPr><w:keepNext/><w:pageBreakBefore/><w:jc w:val="left"/></w:pPr><w:r><w:t xml:space="preserve">하나</w:t></w:r></w:p><w:p>${off}<w:r><w:t xml:space="preserve">둘</w:t></w:r></w:p><w:p>${off}<w:r>`));
+  assert.equal(xml.match(/<w:pageBreakBefore\/>/g).length, 1);
+});
+
+test('scanDocx: 각주·미주·메모 참조 표시가 든 문단·칸은 참조 표시 있음', () => {
+  const data = docxOf(`<w:p><w:r><w:t>본문</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:commentReference w:id="0"/></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r></w:p></w:tc></w:tr></w:tbl>`);
+  const [para, tbl] = scanDocx(data).items;
+  assert.equal(para.note, '참조 표시 있음');
+  assert.equal(tbl.rows[0].cells[0].note, '필드 있음 · 참조 표시 있음');
+});
+
 test('fillDocx: 없는 칸·없는 문단·같은 자리 두 번', () => {
   assert.throws(() => fillDocx(doc, [{ unit: { kind: 'cell', t: 0, r: 9, c: 0 }, text: 'x' }]), /칸을 찾지 못했습니다: T0 r9 c0/);
   assert.throws(() => fillDocx(doc, [{ unit: { kind: 'field', section: 0, p: 99 }, text: 'x' }]), /문단을 찾지 못했습니다: p99/);

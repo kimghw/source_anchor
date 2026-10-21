@@ -54,6 +54,7 @@ test('reviewForm: 유효한 칸·필드 제안과 무효 사유', async () => {
   assert.match(tooLong.problems[0], /^#8: 값은 20,000자까지입니다/);
   assert.deepEqual(notString.problems, ['#8: text 는 문자열이어야 합니다']);
   for (const item of [notInt, missing, isLocked, same, unqualified, tooLong, notString]) assert.equal(item.invalid, true);
+  assert.equal(reviewForm([{ cell: 8, text: 'a\u0002b\r\nc' }], form, index)[0].text, 'ab\nc'); // XML 1.0 금지 글자는 뺀다
 });
 
 test('formText·formBlock: 헤딩·필드·바뀐 칸·잠긴 칸·고정 높이·지침, 크면 파일로', async () => {
@@ -71,6 +72,9 @@ test('formText·formBlock: 헤딩·필드·바뀐 칸·잠긴 칸·고정 높이
   assert.match(text, /notes:\n#9: 필드 있음/);
   assert.match(formText({ ...form, values: { 8: 'v'.repeat(500) } }), /#8\* "v{240}…"/);
   assert.match(formFileText({ ...form, values: { 8: '첫 줄\n둘째 줄' } }), /#8\* "첫 줄\n {8}둘째 줄"/);
+  const heading = { ...form, nodes: form.nodes.map((x, i) => (i ? x : { ...x, text: `첫 줄\n${'h'.repeat(300)}` })) }; // 헤딩도 한 줄로, <form> 에서는 240자에서 자른다
+  assert.ok(formText(heading).split('\n').includes(`# 첫 줄⏎${'h'.repeat(236)}…`));
+  assert.ok(formFileText(heading).split('\n').includes(`# 첫 줄⏎${'h'.repeat(300)}`));
   assert.equal(formBlock(form), `<form>\n${text}\n</form>`);
   const big = { ...form, instructions: { 8: 'w'.repeat(70_000) } };
   const block = formBlock(big);
