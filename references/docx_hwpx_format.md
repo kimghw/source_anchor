@@ -1,14 +1,13 @@
 # DOCX · HWPX 파일 형식 — 표 읽기·셀 기입에 필요한 구조 (2026-10-21)
 
 둘 다 ZIP + XML 이다. 실제 파일(Word 가 만든 회의록 양식 docx, 한컴이 만든 기술수요조사서 hwpx,
-AIComp 의 `hwpxform.py`·vendor `docx_form.py` 가 다룬 파일들)에서 확인한 사실만 적는다.
-앱 안 소비자는 `lib/docx_form.js`·`lib/hwpx_form.js`·`lib/zip.js`(설계: docs/superpowers/specs/2026-10-21-form-fill-design.md).
+그 밖에 이 형식을 다룬 문서들)에서 확인한 사실만 적는다.
 
 ## 공통 — 다시 쓰기 원칙
 
 - 표를 고칠 때 XML 전체를 DOM 으로 읽어 다시 직렬화하면 안 된다. 속성 순서·네임스페이스·
   자기 닫힘 표기가 바뀌어 Word·한글 호환이 깨진다. 바꿀 구간만 문자열로 잘라 바꾼다.
-  (`lib/html.js parseHtml` 은 태그·속성 이름을 소문자로 바꾸고 CDATA·PI 를 버린다 — 읽기 전용.)
+  태그·속성 이름의 대소문자를 바꾸거나 CDATA·처리 지시문을 버리는 파서의 결과도 쓰기에는 쓸 수 없다.
 - 토큰 정규식은 `</?접두사:(tbl|tr|tc|p)(?=[\s/>])` 처럼 뒤를 확인해야 `tcPr`·`tblPr` 를
   셀·표로 잘못 잡지 않는다. 깊이를 세어 최상위 요소만 고른다 — 셀 안에 표가 또 있다.
 - 텍스트 노드 이스케이프는 `& < >` 세 개면 된다(속성에 넣지 않는다).
@@ -22,10 +21,10 @@ AIComp 의 `hwpxform.py`·vendor `docx_form.py` 가 다룬 파일들)에서 확�
 - 한컴 hwpx: `mimetype` 이 **첫 항목이고 저장(STORED)**, 내용 `application/hwp+zip`(19B).
   `version.xml`·`Preview/PrvImage.png` 저장, 나머지 deflate, 플래그 4(비트 2만).
 - 다시 쓸 때 항목 순서와 항목별 압축 방식을 지키고, 손대지 않은 항목은 압축된 바이트를 그대로
-  복사하면 된다. Word·한글은 CRC 를 검사한다(`lib/zip.js readZip` 은 검사하지 않는다) —
-  `zlib.crc32`(Node ≥ 22.2)로 채운다.
+  복사하면 된다. Word·한글은 CRC 를 검사하므로 새로 쓰는 항목은
+  CRC-32 를 채워야 한다(Node ≥ 22.2 의 `zlib.crc32`).
 - `Preview/PrvText.txt`·`PrvImage.png`(hwpx 미리보기)는 본문을 고쳐도 다시 만들지 않아도
-  열린다(AIComp 가 그렇게 쓴다). 스테일 미리보기만 남는다.
+  열린다(확인됨). 오래된 미리보기만 남는다.
 
 ## DOCX (`word/document.xml`)
 
@@ -75,12 +74,10 @@ AIComp 의 `hwpxform.py`·vendor `docx_form.py` 가 다룬 파일들)에서 확�
 - `hp:t` 안에 `<hp:tab/>`·`<hp:lineBreak/>`·`<hp:markpenBegin/>` 같은 태그가 끼어 든다.
 - 그리기 개체(`hp:pic`·`hp:rect`·`hp:container`) 안에도 `subList`/`p` 가 중첩되고, 칸 안에 표가
   또 올 수 있다(중첩 표). 같은 이름 중첩 깊이를 세어 최상위 것만 고른다.
-- 여러 줄 값을 문단 여러 개로 쓸 때 같은 `id` 속성이 반복돼도 한글이 연다(AIComp 가 그렇게
-  쓰고 검증했다).
-- 문단 안 컨트롤은 `<hp:run><hp:ctrl>…</hp:ctrl></hp:run>` 로 온다. `ctrl` 의 자식이 `colPr`(단 설정)·`header`·`footer`·`footNote`·`endNote`·`pageNum`·`pageHiding`·`newNum` 이면 문서 설정이나 머리말·각주 내용이라 그 문단을 새로 쓰면 사라진다. `fieldBegin`/`fieldEnd` 는 누름틀(클릭해 입력하는 필드), `bookmark`·`indexMark`·`hiddenComment`·`autoNum` 은 문서 구조를 바꾸지 않는 표시·자동 번호다.
+- 여러 줄 값을 문단 여러 개로 쓸 때 같은 `id` 속성이 반복돼도 한글이 연다(확인됨).
+- 문단 안 컨트롤은 `<hp:run><hp:ctrl>…</hp:ctrl></hp:run>` 로 온다. `ctrl` 의 자식이 `colPr`(단 설정)·`header`·`footer`·`footNote`·`endNote`·`pageNum`·`pageHiding`·`newNum` 이면 문서 설정이나 머리말·각주 내용이라 그 문단을 새로 쓰면 사라진다. `fieldBegin`/`fieldEnd` 는 필드의 시작·끝이고 종류는 `type` 속성이 정한다(누름틀은 `type="CLICK_HERE"`, 하이퍼링크·날짜 등도 같은 요소). `bookmark`·`indexMark`·`autoNum` 은 문서 구조를 바꾸지 않는 표시·자동 번호다. `hiddenComment` 는 숨은 설명 안에 `subList`/`p` 를 품는다.
 - 섹션의 **첫 문단**은 보통 `<hp:run><hp:secPr …>…</hp:secPr><hp:ctrl><hp:colPr …/></hp:ctrl></hp:run>` 처럼 쪽 설정(`secPr`)과 단 설정(`colPr`)을 함께 품는다 — 본문 첫 줄처럼 보여도 문서 설정 문단이다.
 - 열 그리드가 없으므로 열 폭은 `cellSz width` 로 구한다: 행마다 왼쪽 경계(0)에서 칸 폭을 더해 열 경계를 모으면 병합 칸 사이의 경계도 다른 행에서 풀린다. `colSpan` 1 칸만으로는 기술수요조사서.hwpx 의 11열 중 7열이 풀리지 않았다.
-- 참고: AIComp `references/HWPX_포맷.md`(같은 사실의 원 기록, 2026-09-02).
 
 ## 표본 파일(테스트·수동 확인용, 읽기 전용)
 
