@@ -77,6 +77,13 @@ test('scanHwpx: 중첩 표 잠김 — 중첩 칸의 cellAddr·cellSpan·글은 �
   assert.deepEqual(tbl.cols, [50, 50]);
 });
 
+test('scanHwpx: 열 폭 — 병합 칸 경계는 다른 행에서, rowspan 아래 틈은 아는 경계에서 잇는다', () => {
+  const colsOf = rows => tablesOf(hwpxOf([sectionXml(rows)]))[0].cols;
+  assert.deepEqual(colsOf([[cellXml({ r: 0, c: 0, text: '머리', colSpan: 2, w: 10000 })], [cellXml({ r: 1, c: 0, text: '가', w: 3000 }), cellXml({ r: 1, c: 1, text: '나', w: 7000 })]]), [30, 70]);
+  assert.deepEqual(colsOf([[cellXml({ r: 0, c: 0, text: '세로', rowSpan: 2, w: 2000 }), cellXml({ r: 0, c: 1, text: '가', w: 8000 })], [cellXml({ r: 1, c: 1, text: '나', w: 8000 })]]), [20, 80]);
+  assert.equal(colsOf([[cellXml({ r: 0, c: 0, text: '머리', colSpan: 2, w: 10000 })]]), null); // 가운데 경계를 모른다
+});
+
 test('scanHwpx: 그리기 개체 주의', () => {
   const pic = cellXml({ r: 0, c: 0, text: '그림' }).replace('</hp:run>', '</hp:run><hp:run charPrIDRef="1"><hp:pic id="5"/></hp:run>');
   const data = hwpxOf([secOf(`<hp:p paraPrIDRef="3"><hp:run charPrIDRef="5"><hp:rect id="1"/><hp:t>글</hp:t></hp:run></hp:p>${tablePara([[pic]])}`)]);
@@ -190,6 +197,8 @@ const SAMPLE = 'E:/dev/AIComp/demo/samples/기술수요조사서.hwpx';
   const tables = scanned.items.filter(i => i.kind === 'table');
   assert.equal(tables.length, 2);
   assert.equal(tables.flatMap(t => t.rows.flatMap(row => row.cells)).length, 43);
+  assert.equal(tables[1].cols.length, 11);
+  assert.ok(Math.abs(tables[1].cols.reduce((a, b) => a + b, 0) - 100) <= 0.5);
   const tbl = tables.find(t => t.rows.some(row => row.cells.some(x => x.text)));
   const target = tbl.rows.flatMap(row => row.cells).find(x => x.text);
   const filled = fillHwpx(data, [{ unit: { kind: 'cell', t: tbl.t, r: target.r, c: target.c }, text: '값 & 기입\n둘째 줄' }]);
