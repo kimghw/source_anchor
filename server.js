@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAgent } from './agent.js';
 import { describeAgentConfig, discoverSkills, saveAgentConfig } from './lib/agent_config.js';
+import { downloadDisposition } from './lib/http_names.js';
 import { markedFile } from './lib/marked_file.js';
 import * as store from './lib/store.js';
 
@@ -25,11 +26,11 @@ function sendJson(res, status, data) {
 // 보관한 원본은 남이 만든 파일이다 — 이 서버의 출처로 스크립트가 돌거나 밖으로 요청이 나가지 않게 연다 (FR-PL-011).
 // 웹 스냅샷은 sandbox 로 출처를 떼고 스크립트·외부 자원을 막아 보여 주고, PDF 는 브라우저 보기로, 그 밖의 파일은 내려받게 한다.
 const FILE_TYPES = { '.html': 'text/html', '.pdf': 'application/pdf', '.md': 'text/plain; charset=utf-8', '.txt': 'text/plain' };
-function sendSourceFile(res, { data, name, utf8 = false }) {
+function sendSourceFile(res, { data, name, utf8 = false, downloadName }) {
   const type = FILE_TYPES[path.extname(name)];
   res.writeHead(200, {
     'Content-Type': utf8 && type === 'text/html' ? 'text/html; charset=utf-8' : type || 'application/octet-stream', // 표시를 입힌 스냅샷은 UTF-8 로 다시 쓴 것이다
-    'Content-Disposition': `${type ? 'inline' : 'attachment'}; filename="${name}"`,
+    'Content-Disposition': type ? `inline; filename="${name}"` : downloadDisposition(name, downloadName),
     'X-Content-Type-Options': 'nosniff',
     'Cache-Control': 'no-store',
     ...(type === 'application/pdf' ? {} : { 'Content-Security-Policy': "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:" }),
@@ -85,6 +86,17 @@ async function handleApi(req, res, url) {
     if (req.method === 'GET' && id && !action) return sendJson(res, 200, { doc: await store.getCustomDoc(bookId, id) });
     if (req.method === 'PUT' && id && !action) return sendJson(res, 200, await store.saveCustomDoc({ ...(await readBody(req)), bookId, id }));
     if (req.method === 'DELETE' && id && !action) return sendJson(res, 200, await store.deleteCustomDoc(bookId, id));
+  }
+  // 양식 — 목록 · 올리기(base64) · 읽기 · 저장 · 삭제 · 올린 원본/값을 기입한 사본 내려받기 (FR-WB-090 ~ 092)
+  const form = url.pathname.match(/^/api/books/([^/]+)/forms(?:/([^/]+))?(?:/(original|export))?$/);
+  if (form) {
+    const [bookId, id, file] = [decodeURIComponent(form[1]), form[2] && decodeURIComponent(form[2]), form[3]];
+    if (req.method === 'GET' && !id) return sendJson(res, 200, { forms: await store.formList(bookId) });
+    if (req.method === 'POST' && !id) return sendJson(res, 201, await store.addForm({ ...(await readBody(req, GUIDE_BODY_LIMIT)), bookId }));
+    if (req.method === 'GET' && id && file) return sendSourceFile(res, await store.readFormFile(bookId, id, file));
+    if (req.method === 'GET' && id) return sendJson(res, 200, { form: await store.getForm(bookId, id) });
+    if (req.method === 'PUT' && id && !file) return sendJson(res, 200, await store.saveForm({ ...(await readBody(req)), bookId, id }));
+    if (req.method === 'DELETE' && id && !file) return sendJson(res, 200, await store.deleteForm(bookId, id));
   }
   // 기준 문서 — 목록은 GET /api/book 에 실려 간다. 여기서는 하나의 본문 · 등록(파일은 base64 로 한 요청에 하나) · 종류/제목 고치기 · 삭제 · 보관 파일 열기 (FR-WB-085)
   const guide = url.pathname.match(/^\/api\/books\/([^/]+)\/guides(?:\/([^/]+))?(?:\/(original|markdown))?$/);
