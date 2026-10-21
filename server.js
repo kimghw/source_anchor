@@ -88,7 +88,7 @@ async function handleApi(req, res, url) {
     if (req.method === 'DELETE' && id && !action) return sendJson(res, 200, await store.deleteCustomDoc(bookId, id));
   }
   // 양식 — 목록 · 올리기(base64) · 읽기 · 저장 · 삭제 · 올린 원본/값을 기입한 사본 내려받기 (FR-WB-090 ~ 092)
-  const form = url.pathname.match(/^/api/books/([^/]+)/forms(?:/([^/]+))?(?:/(original|export))?$/);
+  const form = url.pathname.match(/^\/api\/books\/([^/]+)\/forms(?:\/([^/]+))?(?:\/(original|export))?$/);
   if (form) {
     const [bookId, id, file] = [decodeURIComponent(form[1]), form[2] && decodeURIComponent(form[2]), form[3]];
     if (req.method === 'GET' && !id) return sendJson(res, 200, { forms: await store.formList(bookId) });
