@@ -16,7 +16,7 @@ const MAX_BODY = 5 * 1024 * 1024;
 const GUIDE_BODY_LIMIT = 8 * 1024 * 1024; // 기준 문서 올리기 — 5MiB 파일의 base64(약 6.7MiB)와 서지정보 (FR-WB-085)
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
-const agent = createAgent({ loadState: store.loadState, addSource: store.addSource, bookAgentState: store.bookAgentState, bookGuides: store.fullGuides });
+const agent = createAgent({ loadState: store.loadState, addSource: store.addSource, bookAgentState: store.bookAgentState, formAgentState: store.formAgentState, bookGuides: store.fullGuides });
 
 function sendJson(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
