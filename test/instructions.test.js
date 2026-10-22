@@ -1,7 +1,7 @@
 // 장 지시문의 여섯 절 구성 — 절 나누기·합치기·보존·한도 (FR-WB-073)
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ancestorsOf, effectiveText, formatInstructions, GUIDE_KINDS, hasChildren, INSTRUCTIONS_LIMIT, instructionsProblem, parseInstructions, REPORT_SECTIONS, SECTIONS } from '../public/shared/instructions.js';
+import { ancestorsOf, effectiveText, formatInstructions, GUIDE_KIND_DEFAULT, GUIDE_KINDS, guideKind, hasChildren, INSTRUCTIONS_LIMIT, instructionsProblem, parseInstructions, REPORT_SECTIONS, SECTIONS } from '../public/shared/instructions.js';
 
 const empty = () => Object.fromEntries(SECTIONS.map(s => [s.key, '']));
 
@@ -37,11 +37,13 @@ test('보존: 절 없이 적힌 옛 지시문·다른 제목·중복 제목·코
   assert.deepEqual(parseInstructions(out), p);
 });
 
-test('한도: 12,000자까지는 문제 없음, 넘으면 이유를 돌려준다 · 기준 문서 종류는 다섯 가지', () => {
+test('한도: 12,000자까지는 문제 없음, 넘으면 이유를 돌려준다 · 기준 문서 종류는 작성요령·참고문헌 둘', () => {
   assert.equal(INSTRUCTIONS_LIMIT, 12_000);
   assert.equal(instructionsProblem('a'.repeat(INSTRUCTIONS_LIMIT)), null);
   assert.match(instructionsProblem('a'.repeat(INSTRUCTIONS_LIMIT + 1)), /12,000자까지입니다 \(12,001자\)/);
-  assert.deepEqual(Object.values(GUIDE_KINDS), ['규정', '규칙', '작성요령', '작성 요구사항', '기타']);
+  assert.deepEqual(GUIDE_KINDS, { guideline: '작성요령', reference: '참고문헌' });
+  assert.equal(GUIDE_KIND_DEFAULT, 'guideline');
+  assert.deepEqual(['guideline', 'reference', 'regulation', 'rule', 'requirement', 'other', 'bogus', undefined].map(guideKind), ['guideline', 'reference', 'guideline', 'guideline', 'guideline', 'reference', 'guideline', 'guideline']);
 });
 
 test('하위 장 적용·합친 지시문: 상위 장은 목차에서 바로 앞의 더 얕은 장들이고, 공통·상위 장은 헤딩 순서를 빼고 물려주며 끈 장은 물려주지 않는다 (FR-WB-087)', () => {

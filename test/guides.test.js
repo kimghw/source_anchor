@@ -1,4 +1,4 @@
-// 기준 문서(규정·규칙·작성요령·작성 요구사항) 보관·거절·격리, 지시문 한도, 에이전트 프롬프트 블록 (FR-WB-073, 077, 085, DR-WB-006, ERR-WB-008)
+// 기준 문서(작성요령·참고문헌) 보관·종류 맞추기·거절·격리, 지시문 한도, 에이전트 프롬프트 블록 (FR-WB-073, 077, 085, DR-WB-006, ERR-WB-008)
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -19,16 +19,16 @@ const html = title => `<!doctype html><html><head><title>${title}</title></head>
 test('기준 문서 등록: 붙여 넣은 본문과 올린 파일(html·txt)을 보고서에 두고 목록·본문·에이전트 상태·보관 파일로 내며, 다른 보고서에는 나타나지 않는다', async () => {
   const store = await freshStore();
   const { book } = await store.loadBookState();
-  const a = await store.addGuide({ bookId: book.id, kind: 'regulation', title: ' 작성 규정 ', markdown: '# 규정\n\n제1조 목적. 이 규정은 보고서 작성 기준을 정한다.\n\n제2조 문체. 문장은 짧게 쓴다.' });
-  assert.deepEqual([a.guide.id, a.guide.kind, a.guide.type, a.guide.title, a.guide.snapshot], ['G-001', 'regulation', 'text', '작성 규정', undefined]);
-  const b = await store.addGuide({ bookId: book.id, kind: 'guideline', fileName: 'tips.html', data: b64(html('작성요령')) });
-  assert.deepEqual([b.guide.id, b.guide.kind, b.guide.type, b.guide.title, b.guide.snapshot], ['G-002', 'guideline', 'web', '작성요령', 'originals/G-002.html']);
+  const a = await store.addGuide({ bookId: book.id, kind: 'guideline', title: ' 작성 규정 ', markdown: '# 규정\n\n제1조 목적. 이 규정은 보고서 작성 기준을 정한다.\n\n제2조 문체. 문장은 짧게 쓴다.' });
+  assert.deepEqual([a.guide.id, a.guide.kind, a.guide.type, a.guide.title, a.guide.snapshot], ['G-001', 'guideline', 'text', '작성 규정', undefined]);
+  const b = await store.addGuide({ bookId: book.id, kind: 'reference', fileName: 'tips.html', data: b64(html('작성요령')) });
+  assert.deepEqual([b.guide.id, b.guide.kind, b.guide.type, b.guide.title, b.guide.snapshot], ['G-002', 'reference', 'web', '작성요령', 'originals/G-002.html']);
   const c = await store.addGuide({ bookId: book.id, kind: 'bogus', fileName: 'req.txt', data: b64('작성 요구사항 첫 줄.\n둘째 줄.') });
-  assert.deepEqual([c.guide.id, c.guide.kind, c.guide.type, c.guide.title, c.guide.fileName], ['G-003', 'other', 'text', 'req.txt', 'req.txt']);
+  assert.deepEqual([c.guide.id, c.guide.kind, c.guide.type, c.guide.title, c.guide.fileName], ['G-003', 'guideline', 'text', 'req.txt', 'req.txt']); // 모르는 종류는 작성요령
   assert.deepEqual(c.guides.map(g => g.id), ['G-001', 'G-002', 'G-003']);
 
   const state = await store.loadBookState(book.id);
-  assert.deepEqual(state.guides.map(g => [g.id, g.kind, g.type]), [['G-001', 'regulation', 'text'], ['G-002', 'guideline', 'web'], ['G-003', 'other', 'text']]);
+  assert.deepEqual(state.guides.map(g => [g.id, g.kind, g.type]), [['G-001', 'guideline', 'text'], ['G-002', 'reference', 'web'], ['G-003', 'guideline', 'text']]);
   assert.ok(state.guides.every(g => g.blocks === undefined && g.chars > 0)); // 목록에는 본문이 없다
   const full = await store.getGuide(book.id, 'G-002');
   assert.ok(full.blocks.some(bl => bl.sentences.some(s => s.text.includes('제2조'))));
@@ -50,9 +50,14 @@ test('기준 문서 등록: 붙여 넣은 본문과 올린 파일(html·txt)을 
   assert.deepEqual(other.guides, []);
   assert.deepEqual((await store.bookAgentState(other.book.id)).guides, []);
   await assert.rejects(store.getGuide(other.book.id, 'G-001'), /찾지 못했습니다/);
-  // 다시 불러와도 그대로다 (파일에서 읽는다)
+  // 다시 불러와도 그대로다 (파일에서 읽는다) — 두 종류가 되기 전의 종류(규정·규칙·작성 요구사항 → 작성요령, 기타 → 참고문헌)는 읽을 때 맞춘다 (DR-WB-006)
+  const guidesDir = path.join(process.env.WORKSPACE, 'projects', book.id, 'guides');
+  for (const [id, kind] of [['G-001', 'rule'], ['G-003', 'other']]) {
+    const file = path.join(guidesDir, `${id}.json`);
+    await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), kind }));
+  }
   const again = await import(`../lib/store.js?reload=${Date.now()}`);
-  assert.deepEqual((await again.loadBookState(book.id)).guides.map(g => g.id), ['G-001', 'G-002', 'G-003']);
+  assert.deepEqual((await again.loadBookState(book.id)).guides.map(g => [g.id, g.kind]), [['G-001', 'guideline'], ['G-002', 'reference'], ['G-003', 'reference']]);
   await fs.rm(process.env.WORKSPACE, { recursive: true, force: true });
 });
 
@@ -60,7 +65,8 @@ test('기준 문서 거절·고치기·삭제: 지원하지 않는 형식·빈 �
   const store = await freshStore();
   const { book } = await store.loadBookState();
   const guidesDir = path.join(process.env.WORKSPACE, 'projects', book.id, 'guides');
-  await assert.rejects(store.addGuide({ bookId: book.id, kind: 'rule', fileName: 'a.docx', data: b64('PK-docx') }), /지원하지 않는 형식\(DOCX\)/);
+  await assert.rejects(store.addGuide({ bookId: book.id, kind: 'rule', fileName: 'a.xlsx', data: b64('PK-xlsx') }), /지원하지 않는 형식\(XLSX\)/);
+  await assert.rejects(store.addGuide({ bookId: book.id, kind: 'rule', fileName: 'a.docx', data: b64('PK-docx') }), err => err.status === 400); // 손상된 Word 파일 — 형식별 사례는 guide_formats.test.js
   await assert.rejects(store.addGuide({ bookId: book.id, kind: 'rule', markdown: '   ' }), /본문이 비어 있습니다/);
   await assert.rejects(store.addGuide({ bookId: book.id, kind: 'rule', fileName: 'big.txt', data: Buffer.alloc(5 * 1024 * 1024 + 1, 97).toString('base64') }), /5MiB 를 넘습니다/);
   await assert.rejects(store.addGuide({ bookId: book.id, kind: 'rule', fileName: 'old.bin', data: Buffer.from('d0cf11e0a1b11ae100', 'hex').toString('base64') }), /예전 Office 형식/);
@@ -76,8 +82,9 @@ test('기준 문서 거절·고치기·삭제: 지원하지 않는 형식·빈 �
   await assert.rejects(store.deleteGuide(book.id, 'G-001'), /찾지 못했습니다/);
   const third = await store.addGuide({ bookId: book.id, kind: 'rule', markdown: '규칙 셋.' });
   assert.equal(third.guide.id, 'G-003'); // 지운 번호는 다시 쓰지 않는다
-  const edited = await store.updateGuide({ bookId: book.id, id: 'G-003', kind: 'requirement', title: ' 새 제목 ' });
-  assert.deepEqual([edited.guide.kind, edited.guide.title], ['requirement', '새 제목']);
+  const edited = await store.updateGuide({ bookId: book.id, id: 'G-003', kind: 'reference', title: ' 새 제목 ' });
+  assert.deepEqual([edited.guide.kind, edited.guide.title], ['reference', '새 제목']);
+  assert.equal((await store.updateGuide({ bookId: book.id, id: 'G-003', kind: 'requirement' })).guide.kind, 'guideline'); // 옛 종류로 고쳐도 두 종류로 맞춘다
   assert.ok((await store.readGuideFile(book.id, 'G-003', 'markdown')).data.toString('utf8').includes('새 제목'));
   assert.equal((await store.updateGuide({ bookId: book.id, id: 'G-003', title: '' })).guide.title, '제목 없는 기준 문서');
 
@@ -160,10 +167,11 @@ test('프롬프트 블록: 장 대화의 <chapter> 는 지시문 전문·목차(
   assert.ok(chapterBlockText({ doc: { id: 'R-009', title: '홀로' }, book: null, instructions: '' }).includes('not in a report outline'));
 
   assert.ok(guidesText([]).includes('no reference documents'));
-  const guide = { id: 'G-001', kind: 'regulation', title: '작성 규정', fileName: 'r.pdf', collectedAt: 't', hash: 'h', type: 'pdf',
+  const guide = { id: 'G-001', kind: 'guideline', title: '작성 규정', fileName: 'r.pdf', collectedAt: 't', hash: 'h', type: 'pdf',
     blocks: [{ id: 'G-001.b1', kind: 'paragraph', loc: { page: 3 }, sentences: [{ id: 'G-001.b1.s1', text: '제1조 목적.' }] }] };
   const g = guidesText([guide]);
-  assert.ok(g.includes('- G-001 [규정] 작성 규정 (r.pdf) — file guides/G-001.md'));
+  assert.ok(g.includes('- G-001 [작성요령] 작성 규정 (r.pdf) — file guides/G-001.md'));
+  assert.ok(guidesText([{ ...guide, id: 'G-002', kind: 'reference' }]).includes('- G-002 [참고문헌] 작성 규정'));
   assert.ok(g.includes('[G-001.b1.s1] 제1조 목적.'));
 
   const full = chapters.map(ch => ({ ...ch, doc: { blocks: [] }, sources: [] }));

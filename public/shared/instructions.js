@@ -12,7 +12,11 @@ export const SECTIONS = [
 ];
 export const REPORT_SECTIONS = SECTIONS.filter(s => !s.ownOnly); // 보고서 공통 지시문과 하위 장에 물려주는 절 — 헤딩 순서는 그 장에만 있다
 export const INSTRUCTIONS_LIMIT = 12_000; // 지시문 한 편(여섯 절 + 보존한 글)의 글자 수 상한 — 넘으면 자르지 않고 거절한다
-export const GUIDE_KINDS = { regulation: '규정', rule: '규칙', guideline: '작성요령', requirement: '작성 요구사항', other: '기타' }; // 기준 문서의 종류 (FR-WB-085)
+export const GUIDE_KINDS = { guideline: '작성요령', reference: '참고문헌' }; // 기준 문서의 종류 (FR-WB-085) — 작성요령: 보고서를 쓸 때 따를 규정·규칙·요령·요구사항(지시문의 세 절을 채우는 자료), 참고문헌: 쓰면서 참고하는 문헌(규칙을 뽑지 않는다)
+export const GUIDE_KIND_DEFAULT = 'guideline'; // 종류를 모를 때와 등록 대화상자의 첫 기본값
+const LEGACY_GUIDE_KINDS = { regulation: 'guideline', rule: 'guideline', requirement: 'guideline', other: 'reference' }; // 두 종류가 되기 전(2026-10-22)의 다섯 종류
+// 어떤 값이든 두 종류 가운데 하나로 — 서버는 저장·읽기에서, 화면은 탭에 나눌 때 같은 규칙을 쓴다(옛 서버가 남긴 값도 어느 탭에는 보인다) (DR-WB-006)
+export const guideKind = kind => (GUIDE_KINDS[kind] ? kind : (LEGACY_GUIDE_KINDS[kind] ?? GUIDE_KIND_DEFAULT));
 
 const titles = new Map(SECTIONS.map(s => [s.title, s.key]));
 const HEADING = /^#{1,3}\s+(.+?)\s*:?\s*$/;

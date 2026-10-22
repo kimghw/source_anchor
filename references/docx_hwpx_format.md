@@ -2,6 +2,7 @@
 
 둘 다 ZIP + XML 이다. 실제 파일(Word 가 만든 회의록 양식 docx, 한컴이 만든 기술수요조사서 hwpx,
 그 밖에 이 형식을 다룬 문서들)에서 확인한 사실만 적는다.
+한글 5.0 바이너리(`.hwp`, OLE 복합 문서 안의 압축 레코드)는 [hwp_format.md](hwp_format.md) 에 따로 적는다.
 
 ## 공통 — 다시 쓰기 원칙
 
@@ -92,6 +93,22 @@
 - 문단 안 컨트롤은 `<hp:run><hp:ctrl>…</hp:ctrl></hp:run>` 로 온다. `ctrl` 의 자식이 `colPr`(단 설정)·`header`·`footer`·`footNote`·`endNote`·`pageNum`·`pageHiding`·`newNum` 이면 문서 설정이나 머리말·각주 내용이라 그 문단을 새로 쓰면 사라진다. `fieldBegin`/`fieldEnd` 는 필드의 시작·끝이고 종류는 `type` 속성이 정한다(누름틀은 `type="CLICK_HERE"`, 하이퍼링크·날짜 등도 같은 요소). `bookmark`·`indexMark`·`autoNum` 은 문서 구조를 바꾸지 않는 표시·자동 번호다. `hiddenComment` 는 숨은 설명 안에 `subList`/`p` 를 품는다.
 - 섹션의 **첫 문단**은 보통 `<hp:run><hp:secPr …>…</hp:secPr><hp:ctrl><hp:colPr …/></hp:ctrl></hp:run>` 처럼 쪽 설정(`secPr`)과 단 설정(`colPr`)을 함께 품는다 — 본문 첫 줄처럼 보여도 문서 설정 문단이다.
 - 열 그리드가 없으므로 열 폭은 `cellSz width` 로 구한다: 행마다 왼쪽 경계(0)에서 칸 폭을 더해 열 경계를 모으면 병합 칸 사이의 경계도 다른 행에서 풀린다. `colSpan` 1 칸만으로는 기술수요조사서.hwpx 의 11열 중 7열이 풀리지 않았다.
+
+## 문단의 제목·번호 정보 (2026-10-22 표본 파일로 확인)
+
+- DOCX: 문단의 `<w:pPr><w:pStyle w:val="…"/>` 는 스타일 **ID** 다(이름이 아니다). 이름은 `word/styles.xml`
+  의 `<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/>…` — 내장 스타일 이름은
+  소문자 영문(`heading 1`, `header`, `footer`)이고, ID 는 문서를 만든 Word 의 언어에 따라 다를 수 있다
+  (영문 `Heading1`; 한국어 Word 는 `1`·`2` 같은 ID 가 흔하다 — 이 부분은 일반 지식, 표본 미확인).
+  개요 수준은 문단 `w:pPr` 의 `<w:outlineLvl w:val="0"/>`(0 부터, 9 는 본문) 또는 **스타일의 `w:pPr`**
+  에 있고, `<w:basedOn w:val="…"/>` 로 바탕 스타일에서 물려받는다. 자동 번호는 `<w:numPr><w:ilvl/><w:numId/>`
+  이고 번호 글자는 `document.xml` 에 없다(`numbering.xml` 로 그려진다).
+- HWPX: `Contents/header.xml` 의 `<hh:paraPr id="…">` 안 `<hh:heading type="NONE|OUTLINE|NUMBER|BULLET"
+  idRef="…" level="0"/>` 가 문단 머리(개요·번호·글머리표)와 수준(0 부터)이다 — 표본에서는 `NONE`·`BULLET`
+  만 보였고 `OUTLINE`·`NUMBER` 는 같은 자리의 규격 값이다. 스타일은 `<hh:style id="0" type="PARA" name="바탕글"
+  engName="Normal" paraPrIDRef="5" charPrIDRef="16" …/>`(사용자 스타일 이름에 글머리 기호가 들어가기도 한다:
+  `◦ 내용1`). 본문 문단은 여는 태그의 `paraPrIDRef`·`styleIDRef` 로 이것들을 가리키고, 개요·번호 글자는
+  `hp:t` 에 없다.
 
 ## 표본 파일(테스트·수동 확인용, 읽기 전용)
 

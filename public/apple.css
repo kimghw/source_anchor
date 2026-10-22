@@ -145,17 +145,25 @@ input, textarea { caret-color: var(--accent); }
 .tree-tabs button { min-height: 30px; padding: 5px; font-size: 11px; font-weight: 500; }
 .tree-tabs button.is-on { border-color: transparent; background: var(--panel); color: var(--ink); box-shadow: 0 1px 4px rgb(0 0 0 / 8%); }
 .tree { padding: 8px 10px 20px; }
-.tree-root { padding: 12px 10px; border-color: transparent; background: transparent; font-size: 13px; gap: 6px; }
+.tree-root { padding: 12px 10px; border-color: transparent; background: transparent; font-size: 16px; line-height: 1.5; gap: 6px; }
+.tree-root .tree-title, .tree-node .tree-title { white-space: normal; overflow-wrap: anywhere; }
 .tree-root.is-current { border-color: transparent; background: var(--panel); box-shadow: var(--surface-shadow); }
-.tree-root .book-kind { font-size: 10px; color: var(--accent-ink); background: var(--accent-soft); }
-.tree-row { margin-block: 5px; }
+.tree-root .book-kind { font-size: 12px; color: var(--accent-ink); background: var(--accent-soft); }
+.tree-row { margin-block: 1px; }
 .tree-row.is-current { box-shadow: none; background: var(--accent-soft); }
-.tree-node { padding-block: 10px 4px; font-size: 12px; }
+.tree-row.has-current .tree-title, .tree-row.has-current .tree-fold { color: var(--accent-ink); }
+.tree-node { padding-block: 5px; font-size: 16px; line-height: 1.5; }
 .tree-node .tree-title { font-weight: 500; }
+.tree-sub-node .tree-title { font-size: inherit; }
 .tree-no { font-size: 10px; font-weight: 500; }
+.tree .tree-no { font-size: 14px; }
+.tree .tree-fold { margin-top: 8px; }
 .tree-meta { font-size: 10px; opacity: 0.85; }
-.tree-actions { gap: 1px; padding-bottom: 4px; opacity: 0; transition: opacity 140ms ease; }
-.tree-row:hover .tree-actions, .tree-row:focus-within .tree-actions { opacity: 1; }
+/* Row actions float over the row's end instead of taking a line of their own. */
+.tree-actions { position: absolute; top: 4px; right: 4px; flex: none; flex-wrap: nowrap; gap: 1px; padding: 1px; background: var(--panel); box-shadow: var(--surface-shadow); opacity: 0; pointer-events: none; transition: opacity 140ms ease; }
+.tree-row:hover .tree-actions, .tree-row:focus-within .tree-actions { opacity: 1; pointer-events: auto; }
+.tree-tools { display: flex; justify-content: flex-end; gap: 4px; margin: -4px 0 4px; }
+.tree-tools .btn.small { min-height: 24px; padding: 2px 8px; font-size: 11px; }
 .tree-actions .icon-btn { min-height: 24px; min-width: 24px; }
 .tree-add { padding: 0; margin-top: 18px; }
 .tree-add .btn { width: 100%; border-color: var(--line); background: var(--panel); color: var(--ink-2); box-shadow: var(--surface-shadow); }
@@ -199,7 +207,7 @@ h2.blk-body { font-size: 21px; letter-spacing: -0.03em; }
 .custom-text { border-color: var(--line); border-radius: 14px; padding: 22px; }
 
 /* A calm assistant, with prompts separated from the conversation. */
-.col-chat > .col-head .col-title { flex: 1; }
+.col-chat > .col-head .col-title { flex: 1 0 auto; } /* never squeeze the title and model picker — narrow columns wrap the actions instead */
 .model-select { border-color: var(--line); border-radius: 7px; background: var(--panel-2); font-size: 11px; font-weight: 500; }
 .chat-log { padding: 22px 18px; gap: 24px; }
 .chat-welcome { margin: auto 0; padding: 24px 4px; text-align: left; font-size: 12px; line-height: 1.85; }

@@ -1,7 +1,7 @@
 // 보고서(메인문서) 화면 — 1열 목차·지시문(장 제목·여섯 절 지시문 편집), 2열 에이전트, 3열 작성 기준·원문(기준 문서 관리 + 장별 원문 읽기 전용).
 // 장 목록·순서·수준·열기·추가·삭제는 0열 장 탐색기(explorer.js)가 맡는다 (FR-WB-061, 072, 079).
 // 장의 작성 화면과 같은 상단 머리줄을 쓰고, 두 화면은 여기서 갈아 끼운다 (FR-WB-071, 074).
-import { effectiveText, hasChildren, REPORT_SECTIONS } from '../shared/instructions.js';
+import { effectiveText, guideKind, hasChildren, REPORT_SECTIONS } from '../shared/instructions.js';
 import { SOURCE_TYPES } from '../shared/model.js';
 import { outlineNumbers } from '../shared/toc.js';
 import { initBookChat, sendBookMessage, setBookView } from './book_chat.js';
@@ -144,13 +144,14 @@ function openBookMenu() {
 }
 
 // 1열 — 목차·지시문. 장마다 목차 번호·제목과 여섯 절 지시문(toc_editor.js)을 고친다 (FR-WB-072, 073). 순서·수준·열기·추가·삭제는 0열 탐색기가 맡는다.
-// 머리줄의 요청 버튼은 2열 에이전트에게 기준 문서에서 규정 및 규칙·작성요령·작성 요구사항을 뽑아 지시문 수정안으로 내 달라고 보낸다 (FR-WB-086)
-const EXTRACT_REQUEST = '기준 문서(<guides>)에서 장마다 그 장에 해당하는 규정 및 규칙·작성요령·작성 요구사항을 뽑아, 장별 지시문의 그 세 절을 채운 지시문 변경 수정안을 장마다 한 건씩 내 주세요. 문체 및 예시·헤딩 순서·제약조건 절과 제가 직접 적은 글은 그대로 두고, 뽑은 항목마다 기준 문서 ID 와 위치를 붙여 주세요.';
-const canExtract = () => view.guides.length > 0 && view.chapters.length > 0 && !agentBusy;
+// 머리줄의 요청 버튼은 2열 에이전트에게 작성요령 문서(참고문헌 제외)에서 규정 및 규칙·작성요령·작성 요구사항을 뽑아 지시문 수정안으로 내 달라고 보낸다 (FR-WB-086)
+const EXTRACT_REQUEST = '기준 문서 가운데 작성요령 종류(<guides> 의 작성요령 — 참고문헌은 제외)에서 장마다 그 장에 해당하는 규정 및 규칙·작성요령·작성 요구사항을 뽑아, 장별 지시문의 그 세 절을 채운 지시문 변경 수정안을 장마다 한 건씩 내 주세요. 문체 및 예시·헤딩 순서·제약조건 절과 제가 직접 적은 글은 그대로 두고, 뽑은 항목마다 기준 문서 ID 와 위치를 붙여 주세요.';
+const hasGuideline = () => view.guides.some(g => guideKind(g.kind) === 'guideline'); // 참고문헌만 있으면 뽑을 규칙이 없다
+const canExtract = () => hasGuideline() && view.chapters.length > 0 && !agentBusy;
 
 async function requestExtract() {
   await pendingSave; // 고치던 지시문의 저장이 끝난 뒤에 보낸다
-  if (!canExtract()) return toast(view.guides.length ? '에이전트의 답변이 끝나면 다시 요청하세요.' : '작성 기준·원문에서 기준 문서를 먼저 등록하세요.', 'error');
+  if (!canExtract()) return toast(hasGuideline() ? '에이전트의 답변이 끝나면 다시 요청하세요.' : '작성 기준·원문에서 작성요령 문서를 먼저 등록하세요.', 'error');
   sendBookMessage(EXTRACT_REQUEST);
 }
 
@@ -183,7 +184,7 @@ function renderChapters() {
       h('div.col-title', h('span.col-index', '1'), '목차·지시문', h('span.count', String(view.chapters.length))),
       h('div.col-head-actions',
         h('button.btn.small.btn-extract', { type: 'button', disabled: !canExtract(), onclick: requestExtract,
-          title: '등록한 기준 문서에서 규정 및 규칙·작성요령·작성 요구사항을 추출해 장별 지시문 수정안을 요청합니다. 장과 기준 문서를 추가한 뒤 사용할 수 있으며, 에이전트가 답변하는 동안에는 기다려 주세요.' }, '기준 문서로 지시문 제안'),
+          title: '등록한 작성요령 문서(참고문헌 제외)에서 규정 및 규칙·작성요령·작성 요구사항을 추출해 장별 지시문 수정안을 요청합니다. 장과 작성요령 문서를 추가한 뒤 사용할 수 있으며, 에이전트가 답변하는 동안에는 기다려 주세요.' }, '작성요령으로 지시문 제안'),
         collapseButton($('book-chapters'), '1열 목차·지시문'))),
     h('div.chapter-list',
       h('div.workspace-intro',

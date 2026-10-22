@@ -1,8 +1,8 @@
-// 에이전트 연결 설정 대화 상자 — MCP 서버·스킬·서브에이전트를 연결하고 anchor.md(에이전트 지침)를 고친다. 설정은 서버가 Claude·Codex 두 CLI 에 똑같이 넘긴다.
+// 에이전트 연결 설정 대화 상자 — MCP 서버·스킬·서브에이전트를 연결하고 anchor.md(에이전트 지침)를 고치며, 기준 문서 변환 모델을 고른다(FR-WB-098). 설정은 서버가 Claude·Codex 두 CLI 에 똑같이 넘긴다.
 import { api } from './state.js';
 import { fill, h, toast } from './util.js';
 
-let config = { mcpServers: {}, skills: [], subagents: [], models: [], anchor: '', limits: {}, discovered: [] };
+let config = { mcpServers: {}, skills: [], subagents: [], guideConvert: null, models: [], anchor: '', limits: {}, discovered: [] };
 let onChange = () => {};
 
 // 상단 머리줄의 연결 입구 — 어떤 문서를 열어도 보이고, 연결한 개수를 함께 표시한다 (FR-WB-053).
@@ -22,7 +22,7 @@ export function initConnections(root) {
 async function save(next, extra = {}) {
   try {
     // anchor 는 anchor.md 를 저장할 때만 보낸다 — 다른 항목을 고칠 때 파일을 직접 고친 내용을 덮어쓰지 않게
-    config = await api('PUT', '/api/agent/config', { mcpServers: next.mcpServers, skills: next.skills.map(s => s.path ?? s), subagents: next.subagents, ...(extra.anchor !== undefined ? { anchor: extra.anchor } : {}) });
+    config = await api('PUT', '/api/agent/config', { mcpServers: next.mcpServers, skills: next.skills.map(s => s.path ?? s), subagents: next.subagents, ...(extra.anchor !== undefined ? { anchor: extra.anchor } : {}), ...(extra.guideConvert ? { guideConvert: extra.guideConvert } : {}) });
     onChange();
     return true;
   } catch (err) {
@@ -38,7 +38,7 @@ function openDialog() {
     h('p.muted', '여기서 연결한 MCP 서버·스킬·서브에이전트와 anchor.md 는 Claude(Fable·Opus)와 Codex(Codex Astra·Sol) 어느 모델을 골라도 똑같이 쓸 수 있습니다. 다음 메시지부터 적용됩니다.'),
     body,
     h('div.row-actions.end', h('button.btn', { type: 'button', onclick: () => dialog.close() }, '닫기')));
-  const render = () => fill(body, mcpSection(render), skillSection(render), subagentSection(render), anchorSection(render));
+  const render = () => fill(body, mcpSection(render), skillSection(render), subagentSection(render), anchorSection(render), convertSection(render));
   render();
   dialog.addEventListener('close', () => dialog.remove());
   document.body.append(dialog);
@@ -150,6 +150,24 @@ function subagentSection(render) {
     rows.length ? rows : h('p.muted', '등록한 서브에이전트가 없습니다.'),
     form,
     h('p.muted', `서브에이전트는 채팅에서 응답하는 에이전트가 조사 과제를 나눠 맡기는 보조 에이전트입니다(${config.limits.subagents ?? 8}개까지). 고른 모델의 CLI 로 읽기 전용(원문 읽기·웹 검색)으로 실행되어 문서를 바꾸지 못하고, 알려 준 내용은 원문으로 수집된 뒤에야 근거가 됩니다. 채팅에서 "fable 과 codex 에게 나눠 조사시켜 줘"처럼 이름으로 시킬 수 있습니다. 서브에이전트를 부를 때마다 그 모델의 사용량이 듭니다.`));
+}
+
+// ───────────────────────────── 기준 문서 변환 ─────────────────────────────
+
+// PDF 기준 문서를 Markdown 으로 옮기는 에이전트의 모델 — 그다음에 시작하는 변환부터 쓴다 (FR-WB-097, 098)
+function convertSection(render) {
+  const c = config.guideConvert;
+  if (!c) return null;
+  const model = h('select', { 'aria-label': '기준 문서 변환 모델', onchange: async () => {
+    if (await save(config, { guideConvert: { model: model.value } })) {
+      toast(`기준 문서 변환 모델을 ${c.models.find(m => m.id === model.value)?.label ?? model.value}(으)로 정했습니다. 다음에 시작하는 변환부터 씁니다.`);
+      render();
+    } else model.value = c.model;
+  } }, c.models.map(m => h('option', { value: m.id, selected: m.id === c.model }, `${m.label}${m.id === c.models[0].id ? ' (최신 Opus · 기본)' : ''}`)));
+  return h('section.conn-section',
+    h('h3', '기준 문서 변환'),
+    h('div.field-row', h('label.field.conn-model', '변환 모델', model), !c.available && h('p.bad', 'Claude CLI 를 찾지 못했습니다 — 설치·로그인한 뒤 서버를 다시 시작해야 변환합니다.')),
+    h('p.muted', '보고서 화면 3열에 PDF 기준 문서를 넣으면, 이 모델로 띄운 에이전트가 Read 도구로 20쪽씩 읽어 Markdown 으로 옮기고 문장마다 ID 를 붙입니다. 한 문서에 에이전트 최대 10개가 동시에 돌며, 그동안에는 등록 때 본문을 씁니다. 진행 중인 변환은 시작할 때의 모델로 마칩니다. 쪽당 그 모델의 사용량이 듭니다.'));
 }
 
 // ───────────────────────────── anchor.md ─────────────────────────────

@@ -7,6 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%231d5fd1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M12 8v13M12 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM5 13H3a9 9 0 0 0 18 0h-2M9 12h6'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="apple.css">
+  <link rel="stylesheet" href="ask.css">
   <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
 </head>
@@ -26,7 +27,7 @@
       <button class="btn ghost" id="btn-undo" title="실행 취소 (Ctrl+Z)" aria-label="실행 취소 (Ctrl+Z)">↶</button>
       <button class="btn ghost" id="btn-redo" title="다시 실행 (Ctrl+Y)" aria-label="다시 실행 (Ctrl+Y)">↷</button>
       <button class="btn ghost" id="btn-export" title="Markdown 파일로 내보내기"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg>내보내기</button>
-      <button class="btn ghost" id="btn-ratio" type="button" title="0~3열의 가로 너비 비율을 고릅니다 — 균등 25/25/25/25, 편집기 넓게 15/55/15/15 같은 비율을 제안하고 직접 적을 수도 있습니다">열 비율 ▾</button>
+      <button class="btn ghost" id="btn-ratio" type="button" title="지금 열린 열의 가로 너비 비율을 고릅니다 — 열린 열에 맞춘 비율 4가지(모두 열려 있으면 균등 25/25/25/25, 편집기 넓게 15/55/15/15 등)를 제안하고 직접 적을 수도 있습니다. 접힌 열은 접힌 채 둡니다">열 비율 ▾</button>
       <button class="icon-btn capture-btn" id="btn-capture" type="button" title="화면 캡처 — 틀 하나를 누르거나 끌어서 여러 틀을 고르면 보이는 그대로 그림으로 떠서 클립보드에 복사합니다" aria-label="화면 캡처"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6l2-3h4l2 3h4a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z"/><circle cx="12" cy="12" r="4"/></svg></button>
       <span class="topbar-connections" id="topbar-connections"></span>
     </div>

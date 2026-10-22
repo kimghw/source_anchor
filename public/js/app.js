@@ -1,10 +1,12 @@
 // 화면 조립 — 열 초기화, 상단 검증 요약, 열 배치(너비·접기·비율은 columns.js), 실행 취소, Markdown 내보내기
 import { allSentences } from '../shared/model.js';
 import { problemText, SENTENCE_TYPES, STATUS } from '../shared/text.js';
+import { enableAsk } from './ask.js';
 import { applyBookState, initBook, openBook, showBookScreen } from './book.js';
+import { bookAsk } from './book_chat.js';
 import { initBranch } from './branch.js';
 import { pickCapture } from './capture.js';
-import { initChat } from './chat.js';
+import { initChat, mainChat, onLogClick } from './chat.js';
 import { initColumns, openRatioDialog } from './columns.js';
 import { initConnections } from './connections.js';
 import { initCustomDocs, newCustomDoc, openCustomDoc } from './custom_docs.js';
@@ -12,10 +14,11 @@ import { initDocuments, openChapter, openInitialDocument } from './documents.js'
 import { initEditor, revealSentences } from './editor.js';
 import { initEvidence } from './evidence.js';
 import { initExplorer } from './explorer.js';
-import { flushFormSave, initForms, openForm, uploadForm } from './forms.js';
+import { formAsk } from './form_chat.js';
+import { flushFormSave, importToc, initForms, openForm, uploadForm } from './forms.js';
 import { initPanelNav } from './panel_nav.js';
 import { initSources } from './sources.js';
-import { api, canRedo, canUndo, check, on, redo, selectDoc, state, undo } from './state.js';
+import { api, canRedo, canUndo, check, flushSave, on, redo, selectDoc, state, undo } from './state.js';
 import { h, toast } from './util.js';
 
 const $ = id => document.getElementById(id);
@@ -29,9 +32,13 @@ initDocuments($('doc-controls'));
 // 장을 여는 진입점은 값으로 넘겨 순환 import 를 만들지 않는다 — 보고서 화면(에이전트 답의 문장 링크)과 0열 장 탐색기가 쓴다 (FR-WB-061, 074, 076, 079)
 const reveal = id => { selectDoc(id); revealSentences([id]); };
 initBook({ openChapter, reveal });
-initExplorer($('explorer'), { openChapter, openBook: id => openBook(id), bookChanged: applyBookState, reveal, openCustom: openCustomDoc, newCustom: newCustomDoc, openForm, uploadForm, flushForm: flushFormSave });
+initExplorer($('explorer'), { openChapter, openBook: id => openBook(id), bookChanged: applyBookState, reveal, openCustom: openCustomDoc, newCustom: newCustomDoc, openForm, uploadForm, flushForm: flushFormSave, importToc }); // importToc — 0열 양식 행의 「⇪」가 목차 후보 대화상자를 연다 (FR-WB-093)
 initCustomDocs({ openBook: id => openBook(id) }); // 사용자 지정 문서 화면 — 0열 탭에서 연다 (FR-WB-088)
 initForms({ openBook: id => openBook(id), openChapter, reveal }); // 양식 화면 — 0열 「장」 탭의 양식 묶음에서 연다 (FR-WB-090). openChapter·reveal 은 2열 에이전트 답의 장·문장 링크가 쓴다 (FR-WB-091)
+// 2열 채팅마다 답변을 골라(끌어 골라) 그 부분만 따로 묻는 선택 질문 창 — 채팅 모듈은 ask.js 를 import 하지 않고 부품만 내준다 (FR-WB-102)
+enableAsk($('col-chat'), { scope: () => (state.doc?.id ? { docId: state.doc.id } : null), models: mainChat, click: onLogClick, flush: flushSave });
+enableAsk($('book-chat'), bookAsk);
+enableAsk($('form-chat'), formAsk);
 initConnections($('topbar-connections'));
 initColumns(['explorer', 'col-editor', 'col-chat', 'col-sources', 'book-chapters', 'book-chat', 'book-sources', 'custom-editor', 'custom-side', 'custom-sources', 'form-editor', 'form-chat', 'form-sources'].map($)); // 열 너비·접기·비율 — 머리줄이 그려진 뒤 저장한 상태를 되돌린다 (FR-WB-083, 084)
 initPanelNav();

@@ -1,11 +1,12 @@
-// 원문 열람 부품 (FR-WB-075, 078, 080, 081) — 서지정보 · 보기 방식(본문·원본·Markdown) · 참조·메모 띠 · 원본 iframe · 메모 대화상자.
+// 원문 열람 부품 (FR-WB-075, 078, 080, 081) — 서지정보 · 보기 방식(본문·원본·Markdown 미리보기) · 참조·메모 띠 · 원본 iframe · 메모 대화상자.
 // 보고서 화면의 3열·떠 있는 창(book.js)과 장의 원문 열(sources.js)이 함께 쓴다. 본문은 부르는 쪽이 그린다(읽기 전용 / 고르고 끌 수 있는 것).
 // 참조(보고서가 인용한 위치)·메모 목록은 서버(/api/sources/<id>/marks)가 만들고, 원본 위 표시는 서버가 입힌 사본(original?marks=1)이다 (FR-PL-012).
-import { SOURCE_TYPES } from '../shared/model.js';
+import { formatLabel } from '../shared/model.js';
+import { previewUrl, renderMarkdown } from './md_preview.js';
 import { api } from './state.js';
 import { fill, flash, formatDate, h, toast } from './util.js';
 
-const FRAME_EXT = new Set(['html', 'pdf', 'txt']); // 그 자리에 넣을 수 있는 원본 — PPT 는 내려받아 본다. 붙여 넣은 원문에는 원본이 없다
+const FRAME_EXT = new Set(['html', 'pdf', 'txt', 'md']); // 그 자리에 넣을 수 있는 원본 — PPT·Word·한글은 내려받아 본다. 붙여 넣은 원문에는 원본이 없다
 export const snapshotExt = source => source.snapshot?.split('.').pop() || '';
 export const fileUrl = (docId, source, kind, query = '') => `/api/sources/${encodeURIComponent(source.id)}/${kind}?doc=${encodeURIComponent(docId)}${query}`;
 const lastMode = new Map(); // 화면(key)별로 마지막에 고른 보기 방식 — 다음 원문에도 쓴다
@@ -16,7 +17,7 @@ export function viewModes(source) {
   return new Map([
     ['body', { label: '본문', title: '문장·표 단위로 나눈 원문' }],
     ...(FRAME_EXT.has(ext) ? [['original', { label: '원본', title: `수집할 때 내려받아 보관한 원본(${ext})을 그 자리에 보여 줍니다. 인용한 곳과 메모는 형광으로 표시됩니다` }]] : []),
-    ['markdown', { label: 'Markdown', title: '원본과 함께 보관한 Markdown 파일' }],
+    ['markdown', { label: 'Markdown', title: '원본과 함께 보관한 Markdown 파일의 미리보기 — 제목·목록·표를 서식대로, 문장 ID 를 표지로 보여 줍니다. 「Markdown ↗」는 새 탭 미리보기입니다' }],
   ]);
 }
 
@@ -49,9 +50,9 @@ export function readerPane(source, { docId, body, key = 'book', canNote = false,
   const renderStrip = () => { strip.hidden = !withMarks; if (withMarks) fill(strip, marksStrip(marks, { mode, source, jump })); };
   const refresh = () => { loading = null; return loadMarks().then(() => { renderStrip(); decorate(); }); };
   const draw = () => {
-    pane.classList.toggle('is-frame', mode !== 'body');
+    pane.classList.toggle('is-frame', mode === 'original');
     fill(pane, readerMeta(source, modes, mode, pick, { urlFor, actions, showChapter: key === 'book', rows }), strip, content);
-    fill(content, mode === 'body' ? body() : readerFrame(urlFor, source, mode));
+    fill(content, mode === 'body' ? body() : mode === 'markdown' ? markdownView(urlFor('markdown')) : readerFrame(urlFor, source, mode));
     onMode?.(mode);
     renderStrip();
     loadMarks().then(() => { renderStrip(); decorate(); });
@@ -69,7 +70,7 @@ function readerMeta(source, modes, mode, pick, { urlFor, actions, showChapter, r
   const ext = snapshotExt(source);
   const link = (kind, label, title) => h('a.btn.small.ghost', { href: urlFor(kind), target: '_blank', rel: 'noopener noreferrer', title }, label);
   return h('header.src-meta',
-    h('div.src-meta-title', h('span.type-badge', { class: `type-${source.type}` }, SOURCE_TYPES[source.type] ?? source.type), source.title),
+    h('div.src-meta-title', h('span.type-badge', { class: `type-${source.type}` }, formatLabel(source)), source.title),
     h('dl', rows ? rows.map(([dt, dd]) => h('div', h('dt', dt), h('dd', dd))) : [
       showChapter && h('div', h('dt', '장'), h('dd', `${source.chapterTitle || ''} `, h('code.id', `${source.chapterId} · ${source.id}`))),
       h('div', h('dt', '발행'), h('dd', `${source.publisher || '미상'} · ${source.publishedAt || '발행일 미상'}`)),
@@ -81,16 +82,26 @@ function readerMeta(source, modes, mode, pick, { urlFor, actions, showChapter, r
         h('button', { type: 'button', class: key === mode ? 'is-on' : '', title: m.title, onclick: () => pick(key) }, m.label))),
       !modes.has('original') && h('span.muted.reader-note', source.snapshot ? `보관한 원본(${ext})은 그 자리에 넣을 수 없어 내려받아 봅니다` : '붙여 넣은 원문이라 내려받은 원본이 없습니다'),
       source.snapshot && link('original', `원본 (${ext}) ↗`, '수집할 때 내려받아 보관한 원본 파일을 새 탭에서 엽니다'),
-      link('markdown', 'Markdown ↗', '원본과 함께 보관한 Markdown 파일을 새 탭에서 엽니다'),
+      h('a.btn.small.ghost', { href: previewUrl(urlFor('markdown'), source.title), target: '_blank', rel: 'noopener noreferrer', title: '원본과 함께 보관한 Markdown 파일을 새 탭에서 미리보기로 엽니다(그 탭에서 파일 그대로도 볼 수 있습니다)' }, 'Markdown ↗'),
       actions));
 }
 
-// 보관한 원본은 남이 만든 파일이다 — 서버가 CSP sandbox 로 보내고(NFR-PL-001), 웹 스냅샷·텍스트·Markdown 은 iframe 에도 sandbox 를 붙인다.
+// 보관한 원본은 남이 만든 파일이다 — 서버가 CSP sandbox 로 보내고(NFR-PL-001), 웹 스냅샷·텍스트는 iframe 에도 sandbox 를 붙인다.
 // PDF 는 브라우저의 PDF 보기가 sandbox 안에서 돌지 않아 서버 헤더에만 맡긴다. 원본에는 참조·메모 표시를 입힌 사본(marks=1)을 연다
 function readerFrame(urlFor, source, mode) {
   const pdf = mode === 'original' && snapshotExt(source) === 'pdf';
   const base = urlFor(mode, mode === 'original' ? '&marks=1' : '');
-  return h('iframe.src-frame', { src: base, dataset: { base }, title: `${source.id} ${mode === 'markdown' ? 'Markdown' : '원본'}`, ...(pdf ? {} : { sandbox: '' }) });
+  return h('iframe.src-frame', { src: base, dataset: { base }, title: `${source.id} 원본`, ...(pdf ? {} : { sandbox: '' }) });
+}
+
+// Markdown 보기 — 보관한 파일을 받아 미리보기로 그린다(md_preview.js — 글은 텍스트 노드로만 넣는다)
+function markdownView(url) {
+  const box = h('div.src-doc.md-preview', h('p.muted', 'Markdown 파일을 읽는 중…'));
+  fetch(url)
+    .then(res => (res.ok ? res.text() : res.json().catch(() => ({})).then(body => Promise.reject(new Error(body.error || res.statusText)))))
+    .then(text => fill(box, renderMarkdown(text)))
+    .catch(err => fill(box, h('p.muted', `Markdown 파일을 읽지 못했습니다 — ${err.message}`)));
+  return box;
 }
 
 // ───────────────────────────── 참조 · 메모 ─────────────────────────────

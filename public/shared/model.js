@@ -9,13 +9,17 @@
 import { parseNumber, splitSentences } from './text.js';
 
 export const SOURCE_TYPES = { pdf: 'PDF', web: '웹', pptx: 'PPT', text: '텍스트' };
+// 표시할 파일 형식 — 기준 문서는 Word·한글도 받고(FR-WB-085), Markdown 파일은 텍스트와 type 이 같아(text) 파일 이름으로 가른다
+const FORMAT_LABELS = { ...SOURCE_TYPES, docx: 'Word', hwpx: '한글', hwp: '한글' };
+export const formatLabel = source => (source.note ? '요청' : source.type === 'text' && /\.(md|markdown)$/i.test(source.fileName || '') ? 'Markdown' : FORMAT_LABELS[source.type] ?? source.type); // note: 에이전트가 정리한 작성자 요청 문서 (FR-WB-100)
 
-// 블록 초안 [{ kind, loc, text | items | table, key? }] 에 ID 를 붙여 자료 블록으로 만든다
+// 블록 초안 [{ kind, loc, text | items | table, key?, sentences? }] 에 ID 를 붙여 자료 블록으로 만든다.
+// 초안에 문장 배열(sentences)이 있으면 다시 나누지 않는다 — 기준 문서 에이전트 변환은 모델이 한 줄에 한 문장으로 옮긴 경계를 쓴다
 export function buildBlocks(sourceId, drafts) {
   return drafts.map((d, i) => {
     const id = `${sourceId}.b${i + 1}`;
-    const block = { id, kind: d.kind, loc: d.loc || {}, ...(d.level ? { level: d.level } : {}), ...(d.key ? { key: d.key } : {}) };
-    const texts = d.kind === 'list' ? d.items : d.kind === 'table' ? d.table.notes || [] : d.kind === 'heading' ? [d.text] : splitSentences(d.text);
+    const block = { id, kind: d.kind, loc: d.loc || {}, ...(d.level ? { level: d.level } : {}), ...(d.key ? { key: d.key } : {}), ...(d.item ? { item: true } : {}) }; // item: 목록 항목에서 뗀 기준 문서 문단 (lib/guide_outline.js itemNodes)
+    const texts = d.sentences ?? (d.kind === 'list' ? d.items : d.kind === 'table' ? d.table.notes || [] : d.kind === 'heading' ? [d.text] : splitSentences(d.text));
     block.sentences = texts.map((text, j) => ({ id: `${id}.s${j + 1}`, text: String(text).trim() })).filter(s => s.text);
     if (d.kind === 'table') {
       const t = d.table;

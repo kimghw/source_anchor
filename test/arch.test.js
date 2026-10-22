@@ -1,4 +1,4 @@
-// 구조 검사 — CLAUDE.md "파일 크기 상한": 소스 파일 1,200줄 초과 금지, 최상위 import 순환 0
+// 구조 검사 — CLAUDE.md "파일 크기 상한": 소스 파일 1,200줄 초과 금지, 최상위 import 순환 0. public/vendor 는 제3자 코드라 제외한다
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,7 +10,7 @@ const MAX_LINES = 1200;
 
 function sourceFiles(dir = ROOT) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
-    if (['node_modules', 'workspace', '.git', 'test'].includes(entry.name)) return [];
+    if (['node_modules', 'workspace', '.git', 'test', 'vendor'].includes(entry.name)) return [];
     const file = path.join(dir, entry.name);
     if (entry.isDirectory()) return sourceFiles(file);
     return /\.(js|css|html)$/.test(entry.name) ? [file] : [];

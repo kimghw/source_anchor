@@ -14,9 +14,11 @@ const HOST = process.env.HOST || '127.0.0.1';
 const PUBLIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const MAX_BODY = 5 * 1024 * 1024;
 const GUIDE_BODY_LIMIT = 8 * 1024 * 1024; // 기준 문서 올리기 — 5MiB 파일의 base64(약 6.7MiB)와 서지정보 (FR-WB-085)
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const FORM_BODY_LIMIT = 28 * 1024 * 1024; // 양식 올리기 — 20MiB 파일(docx·hwpx·hwp)의 base64(약 26.7MiB)와 제목·파일 이름 (FR-WB-090, DR-WB-008)
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.wasm': 'application/wasm' };
 
-const agent = createAgent({ loadState: store.loadState, addSource: store.addSource, bookAgentState: store.bookAgentState, formAgentState: store.formAgentState, bookGuides: store.fullGuides });
+const agent = createAgent({ loadState: store.loadState, addSource: store.addSource, bookAgentState: store.bookAgentState, formAgentState: store.formAgentState, bookGuides: store.fullGuides,
+  saveBookChat: store.saveBookChat, getBookChat: store.getBookChat, bookChatContext: store.bookChatContext });
 
 function sendJson(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -75,6 +77,8 @@ async function handleApi(req, res, url) {
   if (route === 'PUT /api/book') return sendJson(res, 200, await store.saveToc(await readBody(req)));
   // 보고서 에이전트의 장 추가 수정안 반영 — 목차의 원하는 자리에 빈 장을 만든다 (FR-WB-076)
   if (route === 'POST /api/book/chapters') return sendJson(res, 201, await store.insertChapter(await readBody(req)));
+  // 양식 문서에서 고른 제목(헤딩)들을 빈 장으로 — 목차 끝에 순서대로 이어 붙인다 (FR-WB-093)
+  if (route === 'POST /api/book/chapters/import') return sendJson(res, 201, await store.importChapters(await readBody(req)));
   if (route === 'POST /api/books') return sendJson(res, 201, await store.createBook(await readBody(req)));
   // 사용자 지정 문서 — 목록·만들기·읽기·저장·삭제·장의 원문으로 등록 (FR-WB-088, 089)
   const custom = url.pathname.match(/^\/api\/books\/([^/]+)\/custom(?:\/([^/]+))?(?:\/(register))?$/);
@@ -87,27 +91,57 @@ async function handleApi(req, res, url) {
     if (req.method === 'PUT' && id && !action) return sendJson(res, 200, await store.saveCustomDoc({ ...(await readBody(req)), bookId, id }));
     if (req.method === 'DELETE' && id && !action) return sendJson(res, 200, await store.deleteCustomDoc(bookId, id));
   }
-  // 양식 — 목록 · 올리기(base64) · 읽기 · 저장 · 삭제 · 올린 원본/값을 기입한 사본 내려받기 (FR-WB-090 ~ 092)
+  // 보고서 화면·장 화면 대화 보관 — 목록 · 다시 열기(screen: 'chapter' 면 장 에이전트로) · 분류 제안 · 분류 저장 · 삭제. 보관은 에이전트가 답을 마칠 때마다 한다 (FR-WB-101, DR-WB-010)
+  const chat = url.pathname.match(/^\/api\/books\/([^/]+)\/chats(?:\/([^/]+))?(?:\/(open|suggest))?$/);
+  if (chat) {
+    const [bookId, id, action] = [decodeURIComponent(chat[1]), chat[2] && decodeURIComponent(chat[2]), chat[3]];
+    if (req.method === 'GET' && !id) return sendJson(res, 200, { chats: await store.bookChatList(bookId) });
+    if (req.method === 'POST' && id && action === 'open') return sendJson(res, 200, await agent.openBookChat({ bookId, chatId: id, screen: (await readBody(req)).screen }));
+    if (req.method === 'POST' && id && action === 'suggest') {
+      const body = await readBody(req);
+      const abort = new AbortController(); // 작성자가 제안을 기다리지 않고 창을 닫으면 모델 호출도 멈춘다
+      res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+      return sendJson(res, 200, await agent.suggestChatLabel({ bookId, chatId: id, model: body.model }, abort.signal));
+    }
+    if (req.method === 'PUT' && id && !action) return sendJson(res, 200, { chat: await store.classifyBookChat({ ...(await readBody(req)), bookId, id }) });
+    if (req.method === 'DELETE' && id && !action) return sendJson(res, 200, await store.deleteBookChat(bookId, id));
+  }
+  // 양식 구조 규칙 — 작업공간 수준: 목록 · 삭제. 규칙은 양식 저장(PUT forms/<F> 의 structure)이 남긴다 (FR-WB-095, DR-WB-009)
+  if (route === 'GET /api/form-rules') return sendJson(res, 200, await store.formRules());
+  if (req.method === 'DELETE' && url.pathname.startsWith('/api/form-rules/')) return sendJson(res, 200, await store.deleteFormRule(decodeURIComponent(url.pathname.slice('/api/form-rules/'.length))));
+  // 양식 — 목록 · 올리기(base64) · 읽기 · 저장(값·지침·제목과 구조 조절 structure) · 삭제 · 올린 원본/값을 기입한 사본 내려받기 (FR-WB-090 ~ 092, 094)
   const form = url.pathname.match(/^\/api\/books\/([^/]+)\/forms(?:\/([^/]+))?(?:\/(original|export))?$/);
   if (form) {
     const [bookId, id, file] = [decodeURIComponent(form[1]), form[2] && decodeURIComponent(form[2]), form[3]];
     if (req.method === 'GET' && !id) return sendJson(res, 200, { forms: await store.formList(bookId) });
-    if (req.method === 'POST' && !id) return sendJson(res, 201, await store.addForm({ ...(await readBody(req, GUIDE_BODY_LIMIT)), bookId }));
+    if (req.method === 'POST' && !id) return sendJson(res, 201, await store.addForm({ ...(await readBody(req, FORM_BODY_LIMIT)), bookId }));
     if (req.method === 'GET' && id && file) return sendSourceFile(res, await store.readFormFile(bookId, id, file));
     if (req.method === 'GET' && id) return sendJson(res, 200, { form: await store.getForm(bookId, id) });
     if (req.method === 'PUT' && id && !file) return sendJson(res, 200, await store.saveForm({ ...(await readBody(req)), bookId, id }));
     if (req.method === 'DELETE' && id && !file) return sendJson(res, 200, await store.deleteForm(bookId, id));
   }
-  // 기준 문서 — 목록은 GET /api/book 에 실려 간다. 여기서는 하나의 본문 · 등록(파일은 base64 로 한 요청에 하나) · 종류/제목 고치기 · 삭제 · 보관 파일 열기 (FR-WB-085)
-  const guide = url.pathname.match(/^\/api\/books\/([^/]+)\/guides(?:\/([^/]+))?(?:\/(original|markdown))?$/);
+  // 기준 문서 — 목록은 GET /api/book 에 실려 간다(변환 상태만 다시 받을 때는 GET …/guides). 여기서는 하나의 본문 · 등록(파일은 base64 로 한 요청에 하나) · 종류/제목 고치기 · 삭제 · 보관 파일 열기 (FR-WB-085)
+  // PDF 에이전트 변환: POST …/guides/<G>/convert { action: start | rest | stop } (FR-WB-097)
+  // 합치기: POST …/guides/<G>/merge { from: <끌어 온 문서> } · 마지막 합치기 되돌리기: POST …/guides/<G>/unmerge (FR-WB-099)
+  const guide = url.pathname.match(/^\/api\/books\/([^/]+)\/guides(?:\/([^/]+))?(?:\/(original|markdown|convert|merge|unmerge))?$/);
   if (guide) {
     const [bookId, id, file] = [decodeURIComponent(guide[1]), guide[2] && decodeURIComponent(guide[2]), guide[3]];
+    if (req.method === 'GET' && !id) return sendJson(res, 200, { guides: await store.guideList(bookId) });
     if (req.method === 'POST' && !id) return sendJson(res, 201, await store.addGuide({ ...(await readBody(req, GUIDE_BODY_LIMIT)), bookId }));
-    if (req.method === 'GET' && id && file) return sendSourceFile(res, await store.readGuideFile(bookId, id, file));
+    if (req.method === 'POST' && id && file === 'convert') return sendJson(res, 200, await store.convertGuide({ ...(await readBody(req)), bookId, id }));
+    if (req.method === 'POST' && id && file === 'merge') return sendJson(res, 200, await store.mergeGuide({ ...(await readBody(req)), bookId, id }));
+    if (req.method === 'POST' && id && file === 'unmerge') return sendJson(res, 200, await store.unmergeGuide({ bookId, id }));
+    if (req.method === 'GET' && id && (file === 'original' || file === 'markdown')) return sendSourceFile(res, await store.readGuideFile(bookId, id, file));
     if (req.method === 'GET' && id) return sendJson(res, 200, await store.getGuide(bookId, id));
     if (req.method === 'PUT' && id && !file) return sendJson(res, 200, await store.updateGuide({ ...(await readBody(req)), bookId, id }));
     if (req.method === 'DELETE' && id && !file) return sendJson(res, 200, await store.deleteGuide(bookId, id));
   }
+  // 에이전트가 정리한 작성자 요청을 주제별 작성요령 문서로 저장 — 카드의 저장: { topic, guideId?, text, before } (FR-WB-100)
+  const note = url.pathname.match(/^\/api\/books\/([^/]+)\/guide-notes$/);
+  if (note && req.method === 'POST') return sendJson(res, 200, await store.saveGuideNote({ ...(await readBody(req)), bookId: decodeURIComponent(note[1]) }));
+  // 목차 수정안에 적은 반영 의견·거부 사유·추가의견을 「수정안 검토 의견」에 한 줄 더한다: { action: accept|reject|comment, what, comment } (FR-WB-103)
+  const review = url.pathname.match(/^\/api\/books\/([^/]+)\/review-notes$/);
+  if (review && req.method === 'POST') return sendJson(res, 200, await store.addReviewNote({ ...(await readBody(req)), bookId: decodeURIComponent(review[1]) }));
   if (req.method === 'DELETE' && url.pathname.startsWith('/api/books/')) return sendJson(res, 200, await store.deleteBook(decodeURIComponent(url.pathname.slice('/api/books/'.length))));
   // 화면을 다시 열 때 마지막으로 보던 자리 (FR-WB-074)
   if (route === 'GET /api/place') return sendJson(res, 200, await store.lastPlace());

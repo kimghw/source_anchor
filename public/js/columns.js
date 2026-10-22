@@ -5,21 +5,12 @@ import { h, toast } from './util.js';
 
 const WIDTHS = 'sa.widths';
 const COLLAPSED = 'sa.collapsed';
-const GUTTER = 7; // .gutter 의 너비(px)
 const LIMITS = { explorer: [200, 520], evidence: [260, 900], chat: [260, 900], sources: [260, 900] }; // 손잡이로 줄이고 늘릴 수 있는 한계
 const load = key => { try { return JSON.parse(localStorage.getItem(key)) || {}; } catch { return {}; } };
 const save = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* 남기지 못해도 화면은 그대로 쓴다 */ } };
 let widths = load(WIDTHS);
 let collapsed = load(COLLAPSED);
 let columns = []; // 접을 수 있는 열 요소들
-
-// 비율 제안 — 0열 / 1열 / 2열 / 3열, 합 100
-export const RATIO_PRESETS = [
-  { label: '균등', ratio: [25, 25, 25, 25] },
-  { label: '편집기 넓게', ratio: [15, 55, 15, 15] },
-  { label: '에이전트 넓게', ratio: [15, 40, 30, 15] },
-  { label: '원문 넓게', ratio: [15, 40, 15, 30] },
-];
 
 // 저장한 너비·접힘을 되돌리고 손잡이를 붙인다. 접은 열은 머리줄(띠) 어디를 눌러도 펴지게 한다.
 export function initColumns(cols) {
@@ -81,47 +72,93 @@ function initResizers() {
 
 // ───────────────────────────── 비율 제안 ─────────────────────────────
 
-// 상단 머리줄의 열 비율 대화상자 — 미리 정한 비율을 제안하고 직접 적은 비율도 받는다 (FR-WB-084)
+// 열린 열 구성에 맞춘 비율 제안 4가지 — 인자는 열린 열의 이름(0열·주 열이 접혔으면 비운다), 몫은 화면 왼쪽부터 [0열, 주 열, 곁 열…] 순서이고 합이 100 이다.
+// 주 열은 남는 폭을 가지는 열(1열, 1열이 접혔으면 그 오른쪽의 첫 열린 열), 곁 열은 그 오른쪽의 열린 열이다.
+export function ratioPresets(explorer, main, sides) {
+  const [a, b] = sides;
+  const rows = sides.length === 2 ? (explorer
+    ? [['균등', 25, 25, 25, 25], [`${main} 넓게`, 15, 55, 15, 15], [`${a} 넓게`, 15, 40, 30, 15], [`${b} 넓게`, 15, 40, 15, 30]]
+    : [['균등', 34, 33, 33], [`${main} 넓게`, 70, 15, 15], [`${a} 넓게`, 55, 30, 15], [`${b} 넓게`, 55, 15, 30]])
+    : sides.length === 1 ? (explorer
+      ? [['균등', 33, 34, 33], [`${main} 넓게`, 15, 65, 20], [`${main}·${a} 반반`, 15, 43, 42], [`${a} 넓게`, 15, 30, 55]]
+      : [['균등', 50, 50], [`${main} 넓게`, 75, 25], [`${main} 조금 넓게`, 60, 40], [`${a} 넓게`, 35, 65]])
+      : explorer && main ? [[`${explorer} 좁게`, 10, 90], [`${explorer} 보통`, 15, 85], [`${explorer} 넓게`, 20, 80], [`${explorer} 아주 넓게`, 25, 75]]
+        : []; // 열린 열이 하나뿐이면 고를 비율이 없다
+  return rows.map(([label, ...ratio]) => ({ label, ratio }));
+}
+
+// 지금 화면의 열 — 0열 탐색기와 보이는 작업 틀의 1·2·3열(작성 근거 열은 비율에 넣지 않는다). 주 열은 첫째로 열린 작업 열이다.
+function screenColumns() {
+  const host = document.querySelector('.shell > .workspace:not([hidden])');
+  const all = [document.getElementById('explorer'), ...(host ? host.querySelectorAll(':scope > .col:not(.col-evidence)') : [])];
+  const isOpen = col => !col.hidden && !col.classList.contains('is-collapsed');
+  const main = all.slice(1).find(isOpen);
+  const cols = all.map((el, index) => ({ el, index, name: columnName(el), open: isOpen(el), main: el === main }));
+  return { all: cols, open: cols.filter(col => col.open) };
+}
+
+// 머리줄에 보이는 열 이름(번호·개수·선택 상자를 뺀 글) — 0열은 탭마다 제목이 달라 '탐색기'로 부른다
+function columnName(col) {
+  if (col.id === 'explorer') return '탐색기';
+  const title = col.querySelector(':scope > .col-head .col-title');
+  const text = title && [...title.childNodes].find(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+  return text ? text.textContent.trim() : col.getAttribute('aria-label');
+}
+
+// 상단 머리줄의 열 비율 대화상자 — 지금 열린 열에 맞춘 비율을 제안하고 직접 적은 비율도 받는다. 접힌 열은 접힌 채 둔다 (FR-WB-084)
 export function openRatioDialog() {
-  const input = h('input', { type: 'text', placeholder: '예: 15/50/15/20', spellcheck: false, 'aria-label': '열 비율 직접 적기' });
+  const { all, open } = screenColumns();
+  const explorer = open.find(col => col.el.id === 'explorer');
+  const main = open.find(col => col.main);
+  const presets = ratioPresets(explorer?.name, main?.name, open.filter(col => col !== explorer && col !== main).map(col => col.name));
+  const order = open.map(col => `${col.index}열`).join('/');
+  const closed = all.filter(col => !col.open && !col.el.hidden);
+  const choose = ratio => { applyRatio(ratio, open); dialog.close(); };
+  const input = h('input', { type: 'text', placeholder: `예: ${presets[1]?.ratio.join('/') || ''}`, spellcheck: false, 'aria-label': '열 비율 직접 적기' });
   const dialog = h('dialog.dialog.ratio-dialog',
     h('h2', '열 비율'),
-    h('p.muted', '0열 장 탐색기 / 1열 / 2열 에이전트 / 3열 원문의 가로 너비 비율입니다. 고르면 지금 화면 폭을 그 비율로 나눕니다 — 열의 최소 너비는 지키고 나머지는 1열이 가지며, 접힌 열은 펴집니다.'),
-    h('div.ratio-list', RATIO_PRESETS.map(p => h('button.ratio-row', { type: 'button', onclick: () => { applyRatio(p.ratio); dialog.close(); } },
-      h('span.ratio-bar', p.ratio.map((r, i) => h('span', { class: `seg-${i}`, style: `flex: ${r}` }, String(r)))),
-      h('span.ratio-label', p.label, h('span.muted', ` ${p.ratio.join(' / ')}`))))),
-    h('form.ratio-form', {
+    h('p.muted', `지금 열린 열(${open.map(col => `${col.index} ${col.name}`).join(' / ')})의 가로 너비 비율입니다.`,
+      presets.length ? ` 고르면 지금 화면 폭을 그 비율로 나눕니다 — 열의 최소 너비는 지키고 나머지 폭은 ${main.index}열(${main.name})에 돌아갑니다.` : '',
+      closed.length ? ` 접힌 열(${closed.map(col => `${col.index} ${col.name}`).join(', ')})은 접힌 채 둡니다.` : ''),
+    presets.length
+      ? h('div.ratio-list', presets.map(p => h('button.ratio-row', { type: 'button', onclick: () => choose(p.ratio) },
+        h('span.ratio-bar', p.ratio.map((r, i) => h('span', { class: `seg-${open[i].index}${open[i].main ? ' is-main' : ''}`, style: `flex: ${r}`, title: `${open[i].index}열 ${open[i].name}` }, String(r)))),
+        h('span.ratio-label', p.label, h('span.muted', ` ${p.ratio.join(' / ')}`)))))
+      : h('p.ratio-empty', '열린 열이 하나뿐이라 고를 비율이 없습니다. 접힌 열의 띠를 눌러 펴면 비율을 고를 수 있습니다.'),
+    presets.length ? h('form.ratio-form', {
       onsubmit: event => {
         event.preventDefault();
-        const ratio = parseRatio(input.value);
-        if (!ratio) return toast('비율은 0열/1열/2열/3열 순서로 숫자 4개를 적어 주세요 — 예: 15/50/15/20', 'error');
-        applyRatio(ratio);
-        dialog.close();
+        const ratio = parseRatio(input.value, open.length);
+        if (!ratio) return toast(`비율은 열린 열의 순서(${order})대로 숫자 ${open.length}개를 적어 주세요 — 예: ${presets[1].ratio.join('/')}`, 'error');
+        choose(ratio);
       },
-    }, h('label.field', '직접 적기 (0열/1열/2열/3열)', input), h('button.btn.small', { type: 'submit' }, '적용')),
+    }, h('label.field', `직접 적기 (${order})`, input), h('button.btn.small', { type: 'submit' }, '적용')) : null,
     h('div.row-actions.end', h('button.btn.ghost', { type: 'button', onclick: () => dialog.close() }, '닫기')));
   dialog.addEventListener('close', () => dialog.remove());
   document.body.append(dialog);
   dialog.showModal();
 }
 
-// "15/50/15/20" · "15 50 15 20" · "15,50,15,20" — 양수 4개. 합은 100 으로 맞춘다.
-export function parseRatio(text) {
+// "15/50/15/20" · "15 50 15 20" · "15,50,15,20" — 양수 count 개. 합은 100 으로 맞춘다.
+export function parseRatio(text, count = 4) {
   const nums = String(text).split(/[\/\s,:]+/).filter(Boolean).map(Number);
-  if (nums.length !== 4 || nums.some(n => !Number.isFinite(n) || n <= 0)) return null;
+  if (nums.length !== count || nums.some(n => !Number.isFinite(n) || n <= 0)) return null;
   const sum = nums.reduce((a, b) => a + b, 0);
   return nums.map(n => (n / sum) * 100);
 }
 
-// 화면 폭을 비율로 나눠 0·2·3열의 너비를 정한다 — 1열은 남는 폭이라 저절로 그 몫이 된다. 접힌 열은 편다.
-export function applyRatio(ratio) {
-  for (const root of columns) if (root.classList.contains('is-collapsed')) setCollapsed(root, false);
-  const shell = document.querySelector('.shell');
-  const evidence = document.getElementById('col-evidence');
-  const docked = evidence && !evidence.hidden && !evidence.classList.contains('is-floating') ? evidence.getBoundingClientRect().width + GUTTER : 0;
-  const total = shell.clientWidth - GUTTER * 3 - docked;
+// 열린 열이 나눠 가질 폭을 비율로 나눠 주 열이 아닌 열린 열(0·2·3열)의 너비를 정한다 — 주 열은 남는 폭이라 저절로 그 몫이 된다.
+// 나눌 폭은 열린 열이 지금 차지한 폭의 합이다 — 손잡이·접힌 띠·열로 넣은 작성 근거·틀의 여백은 저절로 빠지고, 틀이 넘쳐 가로로 밀렸으면 넘친 만큼 뺀다.
+// 접힌 열은 접힌 채 두고 너비도 그대로 둔다.
+export function applyRatio(ratio, open = screenColumns().open) {
+  const overflow = el => (el ? Math.max(0, el.scrollWidth - el.clientWidth) : 0);
+  const total = open.reduce((sum, col) => sum + col.el.getBoundingClientRect().width, 0)
+    - overflow(document.querySelector('.shell')) - overflow(document.querySelector('.shell > .workspace:not([hidden])'));
   const clamp = (name, share) => { const [min, max] = LIMITS[name]; return Math.round(Math.max(min, Math.min(max, (total * share) / 100))); };
-  widths = { ...widths, explorer: clamp('explorer', ratio[0]), chat: clamp('chat', ratio[2]), sources: clamp('sources', ratio[3]) };
+  open.forEach((col, i) => {
+    const name = col.el.id === 'explorer' ? 'explorer' : col.el.classList.contains('col-chat') ? 'chat' : col.el.classList.contains('col-sources') ? 'sources' : null;
+    if (name && !col.main) widths[name] = clamp(name, ratio[i]);
+  });
   save(WIDTHS, widths);
   applyWidths();
 }

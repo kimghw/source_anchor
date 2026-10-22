@@ -32,7 +32,7 @@ export function emit(event, detail) {
 export async function api(method, url, body) {
   const res = await fetch(url, { method, headers: method === 'GET' ? {} : { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `요청 실패 (${res.status})`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `요청 실패 (${res.status})`), { status: res.status }); // status: 409 처럼 사유별로 다르게 그릴 때 (note_cards.js)
   return data;
 }
 
@@ -44,7 +44,7 @@ export function applyServerState(data) {
   state.evidence = data.evidence;
   state.docs = data.docs || [];
   state.custom = data.custom || []; // 이 보고서의 사용자 지정 문서 목록 — 0열 탭 (FR-WB-088)
-  state.forms = data.forms || []; // 이 보고서의 양식 요약 목록 — 0열 「장」 탭의 양식 묶음 (FR-WB-090)
+  state.forms = data.forms || []; // 양식 요약 목록 — 작업공간 공통(모든 보고서에 같다), 0열 「장」 탭의 양식 묶음 (FR-WB-090)
   state.book = data.book || null; // 이 장이 속한 보고서와 그 목차 (FR-WB-073)
   state.instructions = data.instructions || ''; // 이 장의 지시문
   state.anchors = buildAnchorIndex(state.sources);

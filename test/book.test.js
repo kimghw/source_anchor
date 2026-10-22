@@ -1,4 +1,5 @@
 // 보고서 화면 에이전트 — 장 추가 수정안 반영(목차의 자리·수준·지시문), 에이전트가 읽는 보고서 상태, 목차 수정안 검사 (FR-WB-076, 077, ERR-WB-007)
+// · 양식 문서에서 고른 제목들을 빈 장으로 목차 끝에 이어 붙이기 (FR-WB-093)
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -49,6 +50,43 @@ test('에이전트가 읽는 보고서 상태: 목차 순서대로 장마다 지
   await fs.rm(process.env.WORKSPACE, { recursive: true, force: true });
 });
 
+test('장 가져오기: 고른 제목들이 빈 장으로 목차 끝에 순서대로 붙고 수준은 규칙 안으로 — 제목은 정리·200자, level 은 정수 1~3 아니면 1', async () => {
+  const store = await freshStore();
+  const { book } = await store.loadBookState();
+  await store.insertChapter({ bookId: book.id, title: 'a', after: 'end' });
+  await store.insertChapter({ bookId: book.id, title: 'b', after: 'end', level: 2 });
+  const long = 'ㄱ'.repeat(260);
+  const data = await store.importChapters({ bookId: book.id, chapters: [
+    { title: '  x ※ 안내  ', level: 3 }, { title: 'y', level: 2 }, { title: '', level: 9 }, { title: long, level: '2' }, { title: 'w', level: 1 }, null, { title: 'v', level: 3 },
+  ] });
+  assert.equal(shape(data.chapters), `a1 b2 x ※ 안내3 y2 제목 없는 장1 ${long.slice(0, 200)}1 w1 제목 없는 장1 v2`); // 제목은 trim 만(※ 는 화면이 뗀다) · 9·'2'·없음 → 1 · v 는 앞 장 + 1 까지
+  assert.deepEqual([data.book.id, data.chapters.length, Array.isArray(data.forms), Array.isArray(data.books)], [book.id, 9, true, true]); // 보고서 화면 상태
+  const imported = data.chapters.slice(2);
+  assert.ok(imported.every(ch => ch.sentences === 0 && ch.sources === 0 && ch.instructions === '' && ch.cascade === true)); // 본문·원문 없는 빈 장
+  assert.deepEqual(new Set(data.chapters.map(ch => ch.id)).size, 9); // 장 ID 는 겹치지 않는다
+  const opened = await store.loadState(imported[0].id); // 만든 장은 파일로 남아 열린다
+  assert.deepEqual([opened.doc.title, opened.doc.blocks], ['x ※ 안내', []]);
+  assert.equal(shape((await store.loadBookState(book.id)).chapters), shape(data.chapters));
+  await fs.rm(process.env.WORKSPACE, { recursive: true, force: true });
+});
+
+test('장 가져오기 거절: 배열이 아니거나 비거나 500건을 넘으면 400, 없는 보고서는 404 — 거절된 요청은 장을 만들지 않는다', async () => {
+  const store = await freshStore();
+  const { book } = await store.loadBookState();
+  await store.insertChapter({ bookId: book.id, title: 'a' });
+  const status = (code, re) => err => err.status === code && re.test(err.message);
+  await assert.rejects(store.importChapters({ bookId: book.id, chapters: 'x' }), status(400, /chapters/));
+  await assert.rejects(store.importChapters({ bookId: book.id, chapters: [] }), status(400, /chapters/));
+  await assert.rejects(store.importChapters({ bookId: book.id }), status(400, /chapters/));
+  await assert.rejects(store.importChapters({ bookId: book.id, chapters: Array.from({ length: 501 }, (_, i) => ({ title: `c${i}`, level: 1 })) }), status(400, /500개까지/));
+  await assert.rejects(store.importChapters({ bookId: 'M-999', chapters: [{ title: 'x', level: 1 }] }), status(404, /보고서를 찾지 못했습니다/));
+  assert.equal(shape((await store.loadBookState(book.id)).chapters), 'a1');
+  const full = await store.importChapters({ bookId: book.id, chapters: Array.from({ length: 500 }, (_, i) => ({ title: `c${i}`, level: 2 })) });
+  assert.equal(full.chapters.length, 501);
+  assert.ok(full.chapters.slice(1).every(ch => ch.level === 2));
+  await fs.rm(process.env.WORKSPACE, { recursive: true, force: true });
+});
+
 test('목차 수정안 검사: 없는 장·자기 하위 장 뒤·빈 제목·같은 값은 제외하고, 나머지는 화면이 반영할 항목으로 바꾼다', () => {
   const chapters = [
     { id: 'R-001', title: '서론', instructions: '배경', level: 1, doc: { blocks: [] }, sources: [] },
@@ -82,4 +120,22 @@ test('목차 수정안 검사: 없는 장·자기 하위 장 뒤·빈 제목·�
   assert.deepEqual([move.chapterId, move.after, move.level], ['R-003', 'start', null]);
   assert.deepEqual([del.chapterTitle, del.sentences, del.sources], ['본론', 1, 1]);
   assert.ok(valid.every(i => typeof i.id === 'string' && i.id.length > 10));
+});
+
+test('importChapters: 도중에 장 파일을 쓰지 못하면 만든 장을 캐시·폴더에서 걷어 내고 목차와 main.json 은 그대로 — 번호는 다시 쓴다', async () => {
+  const store = await freshStore();
+  const { book } = await store.loadBookState();
+  await store.insertChapter({ bookId: book.id, title: 'a', after: 'end' });
+  const blocker = path.join(process.env.WORKSPACE, 'projects', book.id, 'chapters', 'R-003');
+  await fs.writeFile(blocker, 'not a folder'); // R-003 의 폴더 자리를 파일이 막는다 → 셋째 장에서 실패
+  await assert.rejects(store.importChapters({ bookId: book.id, chapters: [{ title: 'x', level: 1 }, { title: 'y', level: 2 }, { title: 'z', level: 2 }] }));
+  const state = await store.loadBookState(book.id);
+  assert.equal(shape(state.chapters), 'a1');
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(process.env.WORKSPACE, 'projects', book.id, 'main.json'), 'utf8')).chapters.map(ch => ch.title), ['a']);
+  await assert.rejects(fs.access(path.join(process.env.WORKSPACE, 'projects', book.id, 'chapters', 'R-002')));
+  await assert.rejects(store.loadState('R-002'), /찾지 못했습니다/);
+  await fs.rm(blocker, { force: true }); // 걷어 내기가 막던 자리까지 지웠을 수 있다
+  const again = await store.importChapters({ bookId: book.id, chapters: [{ title: 'x', level: 1 }, { title: 'y', level: 2 }] });
+  assert.deepEqual(again.chapters.map(ch => [ch.id, ch.title]), [['R-001', 'a'], ['R-002', 'x'], ['R-003', 'y']]);
+  await fs.rm(process.env.WORKSPACE, { recursive: true, force: true });
 });

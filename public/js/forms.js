@@ -1,19 +1,27 @@
-// 양식 화면 — 작성자가 올린 docx·hwpx 양식의 칸·필드에 값을 채운다 (FR-WB-090 ~ 092).
-// 1열 양식(머리줄 + 문서 순서의 헤딩·필드·표 — 번호 배지·제자리 편집·번호별 지침·자동 저장·내려받기) · 2열 양식 에이전트 · 3열 보고서의 작성 기준·원문(보고서 화면 3열과 같은 구성, 읽기 전용).
+// 양식 화면 — 작성자가 올린 docx·hwpx·hwp 양식의 칸·필드에 값을 채운다 (FR-WB-090 ~ 092).
+// 1열 양식(머리줄 + 문서 순서의 헤딩·필드·표 — 번호 배지·제자리 편집·번호별 지침·자동 저장·내려받기·목차로 가져오기) · 2열 양식 에이전트 · 3열 보고서의 작성 기준·원문(보고서 화면 3열과 같은 구성, 읽기 전용).
 // 0열 탐색기 「장」 탭의 양식 묶음에서 열린다. 보고서·장·사용자 지정 문서 화면 모듈(book.js·documents.js·custom_docs.js)을 import 하지 않는다 — 화면 전환 진입점은 app.js 가 넘긴다.
+// 양식의 제목(헤딩)을 보고서의 장으로 가져오는 목차 후보 대화상자는 toc_import.js — 올린 직후·1열 머리줄·0열 양식 행(importToc)에서 연다 (FR-WB-093).
+// 제목·필드 줄의 수준·종류 조절(번호 불변)과 구조 규칙 머리줄·대화상자의 부품은 form_structure.js — 노드 갱신·다시 그리기·저장은 여기서 한다 (FR-WB-094, 095).
+// 한글에서 보는 것처럼 그리는 미리보기는 form_preview.js — 1열 머리줄 「구조 / 미리보기」 전환, 지금 값을 기입한 사본을 쪽 단위로(읽기 전용, hwp·hwpx) (FR-WB-096).
 import { SOURCE_TYPES } from '../shared/model.js';
+import { headingCandidates } from '../shared/toc.js';
 import { guideReader, guidesGroup } from './book_guides.js';
 import { collapseButton } from './columns.js';
-import { showExplorer } from './explorer.js';
-import { initFormChat, setFormView } from './form_chat.js';
+import { applyBookData, showExplorer } from './explorer.js';
+import { initFormChat, sendFormMessage, setFormView } from './form_chat.js';
+import { formPreview, previewable } from './form_preview.js';
+import { canSwitchKind, clearStructure, FORM_LEVEL_MAX, noteStructure, paintStructRow, recordStructure, restoreStructure, rulesHeadControls, setRules, structControls, STRUCTURE_REQUEST, structureKey, takeStructure } from './form_structure.js';
 import { readerDoc } from './reader_doc.js';
 import { readerPane } from './source_view.js';
 import { api, flushSave, state } from './state.js';
+import { openTocImport } from './toc_import.js';
 import { debounce, fill, flash, h, toast } from './util.js';
 
 const $ = id => document.getElementById(id);
 const go = { openBook: async () => {}, openChapter: async () => {}, reveal: () => {} }; // openChapter·reveal — 2열 에이전트 답의 장·문장 링크가 쓴다
-const FILE_LIMIT = 5 * 1024 * 1024; // 서버(lib/forms.js FILE_LIMIT)와 같다 — 올리기 전에 먼저 거른다
+const FILE_LIMIT = 20 * 1024 * 1024; // 서버(lib/forms.js FILE_LIMIT)와 같다 — 올리기 전에 먼저 거른다 (DR-WB-008)
+const FILE_LIMIT_TEXT = `${FILE_LIMIT / 1024 / 1024}MiB`;
 let bookId = null;
 let form = null; // 열어 둔 양식 { id, title, fileName, format, nodes, tables, values, instructions, … }
 let book = null; // 보고서 상태 { book, chapters, sources, guides, custom, forms } — 3열·탐색기
@@ -24,6 +32,8 @@ let units = new Map(); // 번호 → { text(원본 글), locked, note, where(지
 let guideN = null; // 지침 상자에 열어 둔 번호
 let pending = false; // 아직 서버에 보내지 않은 값·지침·제목 변경이 있다
 let saveState = null;
+let preview = null; // 1열 미리보기 부품(form_preview.js) — 양식을 열 때마다 새로 만들고 떠날 때 놓아 준다 (FR-WB-096)
+let previewOn = false; // 1열이 미리보기를 보이고 있다
 
 const formsUrl = (owner, id = '') => `/api/books/${encodeURIComponent(owner)}/forms${id ? `/${encodeURIComponent(id)}` : ''}`;
 const bookUrl = owner => (owner ? `/api/book?report=${encodeURIComponent(owner)}` : '/api/book');
@@ -37,7 +47,7 @@ export function initForms(handlers) {
     h('span.doc-kind', '양식'),
     h('span.doc-current.form-current'));
   acceptFormDrops($('form-workspace'));
-  initFormChat($('form-chat'), { ...cells, showSource, openChapter: openChapterFromForm, flush: flushFormSave }); // 2열 양식 에이전트 (FR-WB-091)
+  initFormChat($('form-chat'), { ...cells, showSource, openChapter: openChapterFromForm, flush: flushFormSave, applyStructure, nodeState, revealNode, guidesChanged: () => reload() }); // 2열 양식 에이전트 (FR-WB-091) — applyStructure·nodeState·revealNode 는 구조 수정안 카드가 쓴다 (FR-WB-095)
   window.addEventListener('beforeunload', () => {
     if (!form) return;
     document.activeElement?.closest('.cell-text')?.blur(); // 편집 중인 칸을 먼저 확정한다 — 확정 전 글은 아직 저장 대상이 아니다
@@ -57,6 +67,7 @@ export async function openForm(wantedBookId, id) {
   if (!(await flushFormSave())) return; // 열어 둔 양식의 값·지침을 저장하지 못하면 옮기지 않는다 — 적은 글은 화면에 남는다 (ERR-WB-011)
   save.cancel();
   pending = false; // 양식 화면 밖에 남은 저장(보던 양식을 지운 뒤 등)은 버린다
+  clearStructure(); // 보내지 못한 구조 변경도 — 다른 양식에 보내면 안 된다
   try {
     const state = await api('GET', bookUrl(wantedBookId));
     const { form: loaded } = await api('GET', formsUrl(state.book.id, id));
@@ -72,16 +83,48 @@ export async function openForm(wantedBookId, id) {
   }
 }
 
-// docx·hwpx 파일 하나를 보고서의 새 양식으로 올리고 곧바로 연다 — 형식·크기는 먼저 거르고, 구조를 읽지 못하면 서버가 사유를 돌려준다 (FR-WB-090, ERR-WB-011)
+// docx·hwpx·hwp 파일 하나를 보고서의 새 양식으로 올리고 곧바로 연다 — 형식·크기는 먼저 거르고, 구조를 읽지 못하면 서버가 사유를 돌려준다 (FR-WB-090, ERR-WB-011).
+// 열기까지 끝나면 문서에서 찾은 제목이 있을 때 목차 후보 대화상자를 바로 연다 (FR-WB-093). 서버가 구조 규칙으로 맞춘 노드가 있으면 그 건수를 알린다 (FR-WB-095)
 export async function uploadForm(wantedBookId, file) {
-  if (!/\.(docx|hwpx)$/i.test(file.name)) return toast(`양식은 docx·hwpx 파일만 올릴 수 있습니다: ${file.name}`, 'error');
-  if (file.size > FILE_LIMIT) return toast(`파일이 5MiB 를 넘습니다 (${(file.size / 1024 / 1024).toFixed(1)}MiB)`, 'error');
+  if (!/\.(docx|hwpx|hwp)$/i.test(file.name)) return toast(`양식은 docx·hwpx·hwp 파일만 올릴 수 있습니다: ${file.name}`, 'error');
+  if (file.size > FILE_LIMIT) return toast(`파일이 ${FILE_LIMIT_TEXT} 를 넘습니다 (${(file.size / 1024 / 1024).toFixed(1)}MiB)`, 'error');
   try {
-    const { form: created } = await api('POST', formsUrl(wantedBookId), { fileName: file.name, data: await readBase64(file) });
+    const { form: created, rulesApplied } = await api('POST', formsUrl(wantedBookId), { fileName: file.name, data: await readBase64(file) });
+    if (rulesApplied > 0) toast(`구조 규칙 ${rulesApplied}건을 적용했습니다`);
     await openForm(wantedBookId, created.id);
+    if (form?.id === created.id && candidateCount(form)) openCandidates(book, form); // 열지 못했으면(저장 실패 등) 묻지 않는다
   } catch (err) {
     toast(err.message, 'error');
   }
+}
+
+// ───────────────────────────── 목차로 가져오기 (FR-WB-093) ─────────────────────────────
+
+const candidateCount = f => headingCandidates(f?.nodes).length; // 장 후보가 될 제목(헤딩)의 수 — 0 이면 가져올 것이 없다
+
+// 0열 양식 행의 「⇪」와 1열 머리줄 「⇪ 목차로 가져오기」 — 보고서 상태(지금 목차)와 양식을 받아 목차 후보 대화상자를 연다. 어느 화면에서든 쓴다.
+// 보고서 상태는 늘 다시 받는다 — 양식 화면에서 0열로 목차를 고친 뒤에는 받아 둔 것이 낡아 있다. 열어 둔 양식이면 구조는 받아 둔 것을 쓴다
+export async function importToc(wantedBookId, formId) {
+  try {
+    const data = await api('GET', bookUrl(wantedBookId));
+    const own = !$('form-workspace').hidden && form?.id === formId && bookId === data.book.id;
+    const target = own ? form : (await api('GET', formsUrl(data.book.id, formId))).form;
+    openCandidates(data, target);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+// 만든 뒤 — 양식 화면이 열려 있으면 받아 둔 보고서 상태를 새 목차로 맞춰 3열·탐색기를 다시 그리고, 다른 화면(보고서·장·사용자 지정 문서)이면 그 화면이 맞춘다(explorer.js applyBookData)
+function openCandidates(data, target) {
+  return openTocImport({ bookId: data.book.id, form: target, chapters: data.chapters, onDone: result => {
+    if (!$('form-workspace').hidden && book && book.book.id === result.book.id) {
+      book.chapters = result.chapters;
+      book.forms = result.forms;
+      renderSources();
+      explore();
+    } else applyBookData(result);
+  } });
 }
 
 const readBase64 = file => new Promise((resolve, reject) => {
@@ -117,6 +160,8 @@ export async function flushFormSave() {
 
 async function leave() {
   if (!(await flushFormSave())) return; // 저장하지 못하면 옮기지 않는다 (ERR-WB-011)
+  preview?.destroy(); // 그려 둔 문서를 놓아 준다 — 다시 열면 새로 그린다
+  preview = null;
   await go.openBook(bookId).catch(err => toast(err.message, 'error'));
 }
 
@@ -154,19 +199,55 @@ function renderHead() {
   fill($('form-controls').querySelector('.form-current'), title, h('span.doc-current-id', form.id));
 }
 
-// 1열 — 머리줄(번호·형식·채우는 단위 수 · 저장 상태 · 내려받기 · 원본), 내려받기 실패 사유, 양식 본문, 지침 상자(번호마다 바꿔 쓰는 하나)
+// 1열 — 머리줄(번호·형식·채우는 단위 수 · 저장 상태 · 구조 규칙 · 규칙으로 수준 정하기 · 목차로 가져오기 · 내려받기 · 원본), 내려받기 실패 사유, 양식 본문, 지침 상자(번호마다 바꿔 쓰는 하나)
 function renderEditor() {
   guideN = null; // 지침 상자는 닫힌 채로 다시 그린다
+  preview?.destroy(); // 구조 보기로 시작한다 — 미리보기는 누를 때 지금 값으로 새로 그린다 (FR-WB-096)
+  preview = null;
+  previewOn = false;
+  $('form-editor').classList.remove('is-preview');
   const count = book.forms.find(f => f.id === form.id)?.units ?? 0;
+  const candidates = candidateCount(form);
   fill($('form-editor'),
     h('header.col-head', h('div.col-title', h('span.col-index', '1'), '양식', h('span.count', `${form.id} · ${form.format} · 단위 ${count}`)),
-      h('div.col-head-actions', saveState,
+      h('div.col-head-actions', viewSwitch(), saveState,
+        rulesHeadControls({ request: () => sendFormMessage(STRUCTURE_REQUEST) }), // 「구조 규칙 N」 · 「규칙으로 수준 정하기」 — 정해진 요청문을 2열로 (FR-WB-095)
+        h('button.btn.small.ghost', { type: 'button', disabled: !candidates, title: candidates ? `이 양식에서 찾은 제목 ${candidates}개를 장·챕터·헤딩 후보로 골라 보고서의 장으로 만듭니다` : '이 양식에서 장 후보로 삼을 제목(헤딩)을 찾지 못했습니다', onclick: () => importToc(bookId, form.id) }, '⇪ 목차로 가져오기'),
         h('button.btn.small', { type: 'button', title: `지금 값을 올린 원본의 새 사본에 기입해 같은 형식(${form.format})으로 내려받습니다`, onclick: event => download(event.currentTarget) }, '⬇ 문서로 내려받기'),
         h('a.btn.small.ghost', { href: `${formsUrl(bookId, form.id)}/original`, target: '_blank', title: '올린 원본 파일 그대로' }, '원본'),
         collapseButton($('form-editor'), '1열 양식'))),
     h('div.form-export-error', { role: 'alert', hidden: true }),
     formBody(),
+    h('div.form-preview', { role: 'region', 'aria-label': '미리보기' }), // 구조 보기와 번갈아 보인다 — CSS #form-editor.is-preview
     h('div.cell-guide', { role: 'region', hidden: true }));
+}
+
+// ───────────────────────────── 구조 / 미리보기 전환 (FR-WB-096) ─────────────────────────────
+// 미리보기 = 지금 값을 기입한 사본(/export — 기입 + 재스캔 확인을 그대로 거친다)을 한글에서 보는 것처럼 쪽 단위로 그린 것. 읽기 전용, hwp·hwpx 만.
+// 전환 전에 저장을 끝내고, 저장하지 못하면 구조 보기에 남는다 — 적은 글이 빠진 사본을 그리면 안 된다
+
+function viewSwitch() {
+  const ok = previewable(form.format);
+  return h('div.segmented.form-view', { role: 'group', 'aria-label': '1열 보기' },
+    h('button', { type: 'button', class: previewOn ? null : 'is-on', onclick: () => setPreview(false) }, '구조'),
+    h('button', { type: 'button', class: previewOn ? 'is-on' : null, disabled: !ok, title: ok ? '지금 값을 기입한 사본을 한글에서 보는 것처럼 쪽 단위로 그립니다 — 읽기 전용' : '미리보기는 hwp·hwpx 양식만 지원합니다 — docx 는 구조 보기만 됩니다', onclick: () => setPreview(true) }, '미리보기'));
+}
+
+async function setPreview(on) {
+  if (on === previewOn || !form) return;
+  if (on) {
+    if (!previewable(form.format)) return;
+    const id = form.id;
+    if (!(await flushFormSave())) return;
+    if (form?.id !== id) return; // 기다리는 사이 다른 양식을 열었다 — 그 양식은 구조 보기로 시작한다
+  }
+  previewOn = on;
+  const editor = $('form-editor');
+  editor.classList.toggle('is-preview', on);
+  editor.querySelectorAll('.form-view button').forEach((button, i) => button.classList.toggle('is-on', (i === 1) === on));
+  if (!on) return;
+  preview ??= formPreview(editor.querySelector('.form-preview'));
+  preview.show(`${formsUrl(bookId, form.id)}/export`);
 }
 
 // ───────────────────────────── 1열 본문 — 헤딩 · 필드 · 표 ─────────────────────────────
@@ -181,6 +262,7 @@ const rowHeight = pt => `height:${Math.min(320, Math.max(28, Math.round(pt * 1.3
 function setValue(n, text) {
   if (text === unitText(n)) delete form.values[n];
   else form.values[n] = text;
+  preview?.markStale(); // 그려 둔 미리보기는 낡았다 — 다음에 보일 때 다시 기입해 그린다 (FR-WB-096)
 }
 
 const mark = (node, n) => {
@@ -208,6 +290,7 @@ function applyValue(n, text) {
   return true;
 }
 function revealCell(n) {
+  if (previewOn) setPreview(false); // 미리보기에서는 단위를 비출 수 없다 — 구조 보기로 돌아간다 (FR-WB-096)
   const node = unitNode(n);
   if (!node) return toast(`#${n} 은 이 양식에 없는 번호입니다.`, 'error');
   node.scrollIntoView({ block: 'center' });
@@ -237,27 +320,116 @@ async function openChapterFromForm(chapterId, sentenceId) {
   if (sentenceId && state.doc?.id === chapterId) go.reveal(sentenceId);
 }
 
-// form.nodes 순서대로 그린다. 필드의 자리 표시는 바로 앞 헤딩
+// form.nodes 순서대로 그린다. 필드의 자리 표시는 바로 앞 헤딩과 수준. 제목·필드 줄은 data-i(nodes index)로 구조 조절·수정안 카드가 찾고, 줄 끝에 구조 조작을 둔다 (FR-WB-094)
+const fieldWhere = (heading, level) => `본문 · ${heading || '—'} · 수준 ${level}`;
 function formBody() {
   units = new Map();
   let heading = '';
   const body = h('div.form-body');
-  for (const node of form.nodes) {
+  form.nodes.forEach((node, i) => {
     if (node.kind === 'heading') {
       heading = node.text;
-      body.append(h(`h3.form-heading.lvl-${node.level}`, node.text));
+      body.append(h(`h3.form-heading.lvl-${node.level}`, { dataset: { i } }, h('span.form-heading-text', node.text), structControls(node, i, structHandlers)));
     } else if (node.kind === 'field') {
-      units.set(node.n, { text: node.text, locked: node.locked, note: node.note, where: `본문 · ${heading || '—'}` });
-      body.append(unitBox(`div.form-field.lvl-${node.level}`, node.n));
+      units.set(node.n, { text: node.text, locked: node.locked, note: node.note, heading, where: fieldWhere(heading, node.level) });
+      const box = unitBox(`div.form-field.lvl-${node.level}`, node.n);
+      box.dataset.i = i;
+      box.append(structControls(node, i, structHandlers));
+      body.append(box);
     } else if (node.kind === 'table') body.append(tableBox(node.t));
-  }
+  });
   return body;
+}
+
+// ───────────────────────────── 구조 조절 (FR-WB-094) ─────────────────────────────
+// 제목·필드 줄의 수준(1~FORM_LEVEL_MAX)·종류를 작성자가 바꾼다 — 번호는 흔들지 않는다: 필드 → 제목이 된 노드는 n 을 남겨 되돌리면 같은 번호, 제목 → 필드는 남긴 n 이 있으면 그것, 없으면 (모든 번호의 최댓값 + 1).
+// 수준만 바뀌면 그 줄만 고치고, 종류가 바뀌면 본문을 다시 그린다(units 재구성). 변경은 form_structure.js 의 대기 묶음에 모아 다음 저장에 함께 보낸다
+
+const rowNode = i => $('form-editor').querySelector(`.form-body [data-i="${i}"]`);
+const structHandlers = { level: (i, delta) => applyStructure(i, { level: (form?.nodes[i]?.level ?? 0) + delta }), kind: (i, kind) => applyStructure(i, { kind }) };
+
+// 1열 줄 조작과 2열 structure 수정안 카드(form_chat.js)가 쓴다 — level·kind 는 바꿀 것만. 불가하면(표 자리·범위 밖·빈 필드·확인 거부·바뀌는 것 없음) false
+function applyStructure(i, { level, kind } = {}) {
+  const node = form?.nodes[i];
+  if (!node || (node.kind !== 'heading' && node.kind !== 'field')) return false;
+  const before = { kind: node.kind, level: node.level };
+  const next = { kind: kind ?? node.kind, level: level ?? node.level };
+  if (!['heading', 'field'].includes(next.kind) || !Number.isInteger(next.level) || next.level < 1 || next.level > FORM_LEVEL_MAX) return false;
+  if (next.kind === before.kind && next.level === before.level) return false;
+  if (next.kind !== before.kind && !switchKind(node, next.kind)) return false;
+  node.level = next.level;
+  noteStructure(node, before);
+  recordStructure(i, node);
+  if (next.kind !== before.kind) redrawBody();
+  else {
+    const row = rowNode(i);
+    if (row) paintStructRow(row, node);
+    const u = node.kind === 'field' ? units.get(node.n) : null;
+    if (u) {
+      u.where = fieldWhere(u.heading, node.level);
+      row?.querySelector('.cell-text')?.setAttribute('aria-label', `#${node.n} ${u.where}`);
+    }
+  }
+  queueSave();
+  setFormView({ bookId, form }); // 이 자리를 겨눈 구조 수정안은 이제 낡았다 — 2열 카드를 다시 맞춘다
+  return true;
+}
+
+// 종류 바꾸기 — 필드 → 제목: 번호는 노드에 남고 값·지침은 지운다(있으면 confirm). 제목 → 필드: 남긴 번호, 없으면 새 번호. 제목 바로 뒤의 빈 필드는 제목이 될 수 없다
+function switchKind(node, kind) {
+  if (kind === 'heading') {
+    if (!canSwitchKind(node)) {
+      toast('제목 바로 뒤의 빈 필드는 제목으로 바꿀 수 없습니다', 'error');
+      return false;
+    }
+    if ((node.n in form.values || node.n in form.instructions) && !confirm(`#${node.n} 을 제목으로 바꾸면 이 번호에 적은 값과 지침이 지워집니다. 계속할까요?`)) return false;
+    delete form.values[node.n];
+    delete form.instructions[node.n];
+  } else if (!Number.isInteger(node.n) || node.n < 1) node.n = nextUnitNumber();
+  node.kind = kind;
+  return true;
+}
+
+// 새 번호 — 칸·필드 번호와 제목이 남겨 둔 번호를 통틀어 최댓값 + 1 (되돌릴 때 번호가 겹치지 않게)
+function nextUnitNumber() {
+  let max = 0;
+  for (const node of form.nodes) {
+    if (Number.isInteger(node.n)) max = Math.max(max, node.n);
+    if (node.kind === 'table') for (const row of form.tables[node.t].rows) for (const cell of row.cells) max = Math.max(max, cell.n);
+  }
+  return max + 1;
+}
+
+// 종류가 바뀌거나 서버가 돌려준 구조가 다를 때 — 본문만 다시 그린다(units 재구성, 번호는 그대로). 스크롤은 그대로 두고, 사라진 번호의 지침 상자는 닫는다
+function redrawBody() {
+  const old = $('form-editor').querySelector('.form-body');
+  if (!old) return;
+  const keep = old.scrollTop;
+  const next = formBody();
+  old.replaceWith(next);
+  next.scrollTop = keep;
+  if (guideN != null && !units.has(guideN)) closeGuide();
+}
+
+// 2열 구조 수정안 카드의 낡음 판정 — 그 자리의 지금 종류·수준·글 (없으면 null)
+function nodeState(i) {
+  const node = form?.nodes[i];
+  return node ? { kind: node.kind, level: node.level, text: node.text } : null;
+}
+
+// 2열 카드의 「제목」 배지 — 1열에서 그 줄을 비춘다 (필드는 revealCell)
+function revealNode(i) {
+  if (previewOn) setPreview(false); // 구조 보기로 돌아가 비춘다 (FR-WB-096)
+  const row = rowNode(i);
+  if (!row) return toast('이 양식에 없는 자리입니다.', 'error');
+  row.scrollIntoView({ block: 'center' });
+  flash(row, 'is-anchor-flash');
 }
 
 // 원본 배치 그대로 — 열 폭 비율(colgroup), 가로·세로 병합(colspan·rowspan), 행 높이. 병합으로 가려진 이어짐 칸은 서버가 이미 뺐다
 function tableBox(t) {
   const { cols, rows } = form.tables[t];
-  const fixed = `고정 높이 행 — 긴 값은 ${form.format === 'hwpx' ? '한글' : 'Word '}에서 잘릴 수 있습니다`;
+  const fixed = `고정 높이 행 — 긴 값은 ${form.format === 'docx' ? 'Word ' : '한글'}에서 잘릴 수 있습니다`;
   return h('figure.form-table', { dataset: { t } },
     h('div.table-wrap', h('table.form-grid', { dataset: { t } },
       Array.isArray(cols) && h('colgroup', cols.map(w => h('col', { style: `width:${w}%` }))),
@@ -356,24 +528,34 @@ const setSaveState = (text, error = false) => {
   saveState.classList.toggle('is-error', error);
 };
 
-// 제목·값·지침을 통째로 보낸다. 서버가 원본과 같은 값을 빼고 돌려주므로, 보내는 동안 더 고친 것이 없을 때만 받아 쓴다.
-// 실패하면 적은 글은 화면에 남기고 false — 옮기기 전 저장이 실패하면 옮기지 않는다 (ERR-WB-011)
+// 제목·값·지침을 통째로, 구조 변경은 모아 둔 것만 보낸다. 서버가 원본과 같은 값을 빼고 돌려주므로, 보내는 동안 더 고친 것이 없을 때만 받아 쓴다.
+// 구조를 보냈으면 번호·조절 표시는 서버 것으로 두되 보이는 구조가 다를 때만 다시 그린다. 실패하면 적은 글은 화면에 남기고 false — 옮기기 전 저장이 실패하면 옮기지 않는다 (ERR-WB-011, FR-WB-094)
 async function putForm() {
   const f = form;
   if (!f || !pending) return true;
   pending = false;
+  const structure = takeStructure(); // 보내는 순간 비운다 — 그새 또 바꾼 것은 다음 저장에
   try {
-    const res = await api('PUT', formsUrl(bookId, f.id), { title: f.title, values: f.values, instructions: f.instructions });
+    const res = await api('PUT', formsUrl(bookId, f.id), { title: f.title, values: f.values, instructions: f.instructions, ...(structure.length && { structure }) });
     if (f !== form) return true;
-    if (!pending) Object.assign(f, { values: res.form.values, instructions: res.form.instructions });
+    if (!pending) {
+      Object.assign(f, { values: res.form.values, instructions: res.form.instructions });
+      if (structure.length && Array.isArray(res.form.nodes)) {
+        const changed = structureKey(res.form.nodes) !== structureKey(f.nodes);
+        f.nodes = res.form.nodes;
+        if (changed) redrawBody();
+      }
+    }
     f.updatedAt = res.form.updatedAt;
     book.forms = res.forms;
+    setRules(res.rules); // 구조를 바꿨으면 규칙이 생기거나 지워졌다 — 머리줄 「구조 규칙 N」 (FR-WB-095)
     if (!pending) setSaveState('저장됨');
     if (!$('form-workspace').hidden) explore(); // 그새 다른 화면으로 옮겼으면 탐색기는 그 화면의 것이다
     return true;
   } catch (err) {
     if (f === form) {
       pending = true;
+      restoreStructure(structure); // 보내지 못한 구조 변경은 다음 저장에 다시
       setSaveState('저장 실패', true);
     }
     toast(`양식을 저장하지 못했습니다: ${err.message}`, 'error');

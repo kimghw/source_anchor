@@ -1,15 +1,17 @@
 // 양식 화면 2열 — 양식 에이전트. 작성자가 #번호로 가리킨 칸·필드의 값을 제안받아 단위마다 반영하거나 거부한다 (FR-WB-091).
 // 에이전트는 값을 직접 써 넣지 않는다 — 단위 한 건씩의 수정안(전후 글·사유·근거 위치)으로 내고, 반영한 값만 1열 양식에 들어간다.
 // 제안을 낸 뒤 그 단위의 글이 달라졌으면 반영하지 않고 그렇게 표시한다. 채팅 부품(스트림·Markdown·사용량 표시)은 chat.js 의 것을 함께 쓴다.
+// 제목·필드의 수준·종류(상하관계) 제안도 같은 방식의 구조 수정안 카드로 — 반영하면 forms.js 가 1열을 바꾸고 저장하며 구조 규칙으로 남긴다 (FR-WB-095).
 // forms.js 가 이 모듈을 부르므로 forms.js·book.js·book_chat.js 를 import 하지 않는다 — 1열·3열 조작은 handlers 로 받는다.
 import { describeUsage, modelOptions, renderMarkdown, streamChat, TOOL_LABELS } from './chat.js';
 import { collapseButton } from './columns.js';
 import { api } from './state.js';
+import { noteCard } from './note_cards.js';
 import { diffText } from './suggest.js';
-import { fill, h } from './util.js';
+import { fill, h, toast } from './util.js';
 
 let log, input, sendBtn, modelSelect, ctxMeter;
-const go = { cellText: () => '', applyValue: () => false, revealCell: () => {}, markProposal: () => {}, showSource: () => {}, openChapter: async () => {}, flush: async () => true };
+const go = { cellText: () => '', applyValue: () => false, revealCell: () => {}, markProposal: () => {}, showSource: () => {}, openChapter: async () => {}, flush: async () => true, applyStructure: () => false, nodeState: () => null, revealNode: () => {}, guidesChanged: async () => {} };
 let view = { bookId: null, form: null };
 let conversationId = null;
 let running = false;
@@ -17,7 +19,9 @@ let abort = null;
 let lastModel = null;
 let models = [];
 let usageByModel = {}; // 이 대화에서 응답한 모델별 컨텍스트 사용량 (FR-WB-058)
-let batches = []; // 양식 수정안 묶음 [{ id, model, items: [{ id, cell, kind, text, reason, anchors, before, label, decision: 'pending' | 'accepted' | 'rejected' | 'stale' }] }]
+// 수정안 묶음 — 카드의 data-batch 는 key. 값: { key, id, model, items: [{ id, cell, kind, text, reason, anchors, before, label, decision }] } · 구조: { key, id, model, structure: true, items: [{ id, structure: true, target, i, text, before: { kind, level }, level, kind, reason, decision }] }
+// decision: 'pending' | 'accepted' | 'rejected' | 'stale'
+let batches = [];
 
 const SUGGESTIONS = [
   { label: '빈 칸 채우기', text: '비어 있는 칸과 필드를 각 번호의 지침에 따라 채워 줘' },
@@ -51,12 +55,23 @@ export function initFormChat(root, handlers) {
   loadModels();
 }
 
-// forms.js 가 양식을 그리거나 단위를 손으로 고칠 때마다 부른다 — 다른 양식(보고서마다 F-001 이 있으므로 보고서도 본다)이면 대화를 새로 시작하고, 같으면 카드의 반영 가능 여부만 다시 맞춘다
+// forms.js 가 양식을 그리거나 단위를 손으로 고칠 때마다 부른다 — 다른 양식이거나 다른 맥락 보고서(양식은 공통이지만 에이전트가 읽는 원문이 달라진다)면 대화를 새로 시작하고, 같으면 카드의 반영 가능 여부만 다시 맞춘다
 export function setFormView(next) {
   const changed = next.bookId !== view.bookId || next.form?.id !== view.form?.id;
   view = next;
   if (changed) newChat();
   else renderFormCards();
+}
+
+// 1열 머리줄의 정해진 요청(「규칙으로 수준 정하기」)을 이 대화로 보낸다 — 답하는 중이거나 양식이 없으면 보내지 않고 알린다 (FR-WB-095)
+export function sendFormMessage(text) {
+  if (!view.form) return false;
+  if (running) {
+    toast('에이전트의 답변이 끝나면 다시 요청하세요.', 'error');
+    return false;
+  }
+  send(text);
+  return true;
 }
 
 async function loadModels() {
@@ -125,10 +140,17 @@ async function send(text) {
     text: ev => { raw += ev.d; textEl.replaceChildren(...renderMarkdown(raw, formLinks)); },
     tool: ev => bubble.append(h('div.tool', h('span.tool-name', TOOL_LABELS[ev.name] || ev.name), h('span.tool-summary', ev.summary || ''))),
     form: ev => {
-      batches.push({ id: ev.id, model: ev.model, items: ev.items.map(item => ({ ...item, decision: 'pending' })) });
+      batches.push({ key: ev.id, id: ev.id, model: ev.model, items: ev.items.map(item => ({ ...item, decision: 'pending' })) });
       bubble.append(h('div.proposal', { dataset: { batch: ev.id } }));
       renderFormCards();
     },
+    structure: ev => { // 제목·필드의 수준·종류 수정안 — 값 수정안과 같은 턴에 올 수 있으므로 카드 열쇠를 따로 둔다 (FR-WB-095)
+      const key = `structure:${ev.id}`;
+      batches.push({ key, id: ev.id, model: ev.model, structure: true, items: ev.items.map(item => ({ ...item, structure: true, decision: 'pending' })) });
+      bubble.append(h('div.proposal', { dataset: { batch: key } }));
+      renderFormCards();
+    },
+    guides: ev => bubble.append(noteCard(ev, { saved: () => go.guidesChanged() })), // 작성요령 저장 카드 — 저장하면 3열 기준 문서 목록을 다시 받는다 (FR-WB-100)
     notice: ev => bubble.append(h('div.notice', ev.text)),
     usage: ev => { usageByModel[ev.model] = ev; renderUsage(); },
     error: ev => bubble.append(h('div.notice.is-error', ev.message)),
@@ -200,6 +222,8 @@ function formLinks(text, code = false) {
 function onLogClick(event) {
   const cell = event.target.closest('[data-cell]');
   if (cell) return go.revealCell(Number(cell.dataset.cell));
+  const node = event.target.closest('[data-node]');
+  if (node) return go.revealNode(Number(node.dataset.node)); // 구조 수정안의 「제목」 배지 — 1열의 그 제목 줄
   const ref = event.target.closest('[data-book-ref]');
   if (ref) {
     const [chapterId, rest] = ref.dataset.bookRef.split('/');
@@ -215,32 +239,77 @@ function onLogClick(event) {
   renderFormCards();
 }
 
-const batchOf = node => batches.find(b => b.id === node.closest('[data-batch]')?.dataset.batch);
+// 선택 질문 창(ask.js — app.js 가 이어 준다)이 이 채팅에서 띄울 때 쓰는 부품: 양식과 맥락 보고서, 고른 모델, #번호·장 ID 링크와 그 클릭, 보내기 전 양식 저장 (FR-WB-102)
+export const formAsk = {
+  scope: () => (view.form ? { bookId: view.bookId, formId: view.form.id } : null),
+  models: () => ({ model: modelSelect.value, models }),
+  render: raw => renderMarkdown(raw, formLinks),
+  click: onLogClick,
+  flush: async () => { if (!(await go.flush())) throw new Error('양식을 저장하지 못해 보내지 않았습니다 — 저장된 뒤 다시 보내세요.'); },
+};
+
+const batchOf = node => batches.find(b => b.key === node.closest('[data-batch]')?.dataset.batch);
 
 // ───────────────────────────── 양식 수정안 카드 ─────────────────────────────
 
 const DECISION = { accepted: '반영됨', rejected: '거부됨', stale: '수정안을 낸 뒤 이 칸의 글이 달라져 반영하지 않았습니다 — 다시 요청하세요' };
+const STRUCTURE_DECISION = { accepted: '반영됨 — 1열이 바뀌었고 구조 규칙으로 남습니다', rejected: '거부됨', stale: '수정안을 낸 뒤 이 자리의 구조가 달라져 반영하지 않았습니다 — 다시 요청하세요' };
 const pendingItems = () => batches.flatMap(b => b.items).filter(i => i.decision === 'pending');
-const pendingCells = () => new Set(pendingItems().map(i => i.cell));
-// 수정안은 낼 때의 글(before)을 기준으로 한다 — 그 뒤 작성자가 고쳤거나 다른 제안을 반영했으면 반영하지 않는다 (FR-WB-091)
-const isStale = item => item.before !== go.cellText(item.cell);
+const pendingCells = () => new Set(pendingItems().filter(i => !i.structure).map(i => i.cell));
+// 수정안은 낼 때의 글(before)을 기준으로 한다 — 그 뒤 작성자가 고쳤거나 다른 제안을 반영했으면 반영하지 않는다 (FR-WB-091).
+// 구조 수정안은 그 자리의 종류·수준·글(before·text)이 지금과 같을 때만 — 작성자가 1열에서 조절했거나 다른 제안을 반영했으면 낡은 것 (FR-WB-095)
+const isStale = item => (item.structure ? isStaleStructure(item) : item.before !== go.cellText(item.cell));
+function isStaleStructure(item) {
+  const now = go.nodeState(item.i);
+  if (!now || now.kind !== item.before?.kind || now.level !== item.before?.level) return true;
+  return item.text != null && squash(now.text) !== squash(item.text); // 글은 공백 차이를 무시하고 — 에이전트 검사가 정리한 글을 줄 수 있다
+}
+const squash = text => String(text ?? '').replace(/\s+/g, ' ').trim();
 
 // 수정안 상태가 바뀌거나 1열이 다시 그려지거나 단위를 손으로 고칠 때마다 채팅 안의 카드들과 1열의 대기 표시를 다시 맞춘다
 function renderFormCards() {
   for (const card of log.querySelectorAll('[data-batch]')) {
-    const batch = batches.find(b => b.id === card.dataset.batch);
+    const batch = batches.find(b => b.key === card.dataset.batch);
     if (!batch) continue;
     const pending = batch.items.filter(i => i.decision === 'pending');
     fill(card,
       h('div.proposal-head',
-        h('span', `${batch.model} 양식 수정안 ${batch.items.length}건`, pending.length < batch.items.length && h('span.muted', ` · 남은 검토 ${pending.length}건`)),
+        h('span', `${batch.model} ${batch.structure ? '구조' : '양식'} 수정안 ${batch.items.length}건`, pending.length < batch.items.length && h('span.muted', ` · 남은 검토 ${pending.length}건`)),
         pending.length > 1 && h('span.proposal-head-actions',
           h('button.btn.small', { type: 'button', dataset: { decideAll: 'ok' } }, '모두 반영'),
           h('button.btn.small.ghost', { type: 'button', dataset: { decideAll: 'no' } }, '모두 거부'))),
-      batch.items.map(formItem),
-      pending.length > 0 && h('div.proposal-foot', '반영하기 전에는 양식이 바뀌지 않습니다.'));
+      batch.items.map(batch.structure ? structureItem : formItem),
+      pending.length > 0 && h('div.proposal-foot', batch.structure ? '반영하면 1열의 제목·필드가 바뀌어 저장되고, 정한 상하관계는 구조 규칙으로 남습니다.' : '반영하기 전에는 양식이 바뀌지 않습니다.'));
   }
   for (const n of pendingCells()) go.markProposal(n, true);
+}
+
+// 구조 수정안 한 건 — 대상 배지(#n 은 1열의 그 단위, 「제목」은 그 제목 줄을 비춘다) · 글 앞 40자 · 변경 「필드 → 제목」「수준 1 → 2」 · 사유 · 반영/거부 (FR-WB-095)
+const KIND_LABEL = { heading: '제목', field: '필드' };
+const clip = (text, max = 40) => {
+  const clean = String(text ?? '').replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
+};
+function structureItem(item) {
+  const stale = item.decision === 'pending' && isStale(item);
+  const before = item.before ?? {};
+  const field = before.kind === 'field';
+  const changes = [
+    item.kind && item.kind !== before.kind && `${KIND_LABEL[before.kind] ?? before.kind} → ${KIND_LABEL[item.kind] ?? item.kind}`,
+    item.level && item.level !== before.level && `수준 ${before.level} → ${item.level}`,
+  ].filter(Boolean);
+  return h('div.proposal-item.structure-item', { class: `is-${item.decision}`, dataset: { item: item.id } },
+    h('div.change-head',
+      h('button.op-badge.op-structure', { type: 'button', dataset: field ? { cell: String(item.target).slice(1) } : { node: item.i }, title: field ? `${item.target} — 1열에서 이 단위 보기` : '1열에서 이 제목 줄 보기' }, field ? item.target : '제목'),
+      h('span.structure-text', { title: item.text }, clip(item.text) || '(빈 글)')),
+    h('div.structure-change', changes.length ? changes.map(c => h('span.structure-delta', c)) : h('span.muted', '바뀌는 것이 없습니다')),
+    stale && h('div.notice.is-error.toc-stale', '이 자리의 글이나 구조가 수정안을 낸 뒤 달라졌습니다 — 반영할 수 없으니 다시 요청하세요.'),
+    item.reason && h('div.change-reason', item.reason),
+    item.decision === 'pending'
+      ? h('div.change-actions',
+        h('button.btn.small', { type: 'button', dataset: { decide: 'ok' }, disabled: stale }, '✓ 반영'),
+        h('button.btn.small.ghost', { type: 'button', dataset: { decide: 'no' } }, '✕ 거부'))
+      : h('div.change-decision', { class: item.decision === 'stale' ? 'is-stale' : '' }, STRUCTURE_DECISION[item.decision]));
 }
 
 function formItem(item) {
@@ -266,16 +335,21 @@ const valueDiff = (before, after) => (before.length + after.length > DIFF_LIMIT
 
 // ───────────────────────────── 반영 · 거부 ─────────────────────────────
 
-// 한 건을 정한다 — 반영은 forms.js 가 1열에 넣고 저장한다(잠긴 단위면 false → 대기 그대로). 한 칸에는 한 값이므로 같은 칸의 다른 대기 제안은 거둔다
+// 한 건을 정한다 — 반영은 forms.js 가 1열에 넣고 저장한다(잠긴 단위면 false → 대기 그대로). 한 칸에는 한 값이므로 같은 칸의 다른 대기 제안은 거둔다.
+// 구조 수정안도 forms.js 가 노드를 바꾸고 저장한다(빈 필드·확인 거부면 false → 대기 그대로) — 같은 자리의 다른 대기 제안은 거둔다
 function decide(item, accept) {
   if (item.decision !== 'pending') return;
   if (!accept) item.decision = 'rejected';
   else if (isStale(item)) item.decision = 'stale';
-  else if (go.applyValue(item.cell, item.text)) {
+  else if (item.structure) {
+    if (!go.applyStructure(item.i, { level: item.level ?? undefined, kind: item.kind ?? undefined })) return;
     item.decision = 'accepted';
-    for (const other of pendingItems()) if (other.cell === item.cell) other.decision = 'rejected';
+    for (const other of pendingItems()) if (other.structure && other.i === item.i) other.decision = 'rejected';
+  } else if (go.applyValue(item.cell, item.text)) {
+    item.decision = 'accepted';
+    for (const other of pendingItems()) if (!other.structure && other.cell === item.cell) other.decision = 'rejected';
   } else return;
-  if (!pendingCells().has(item.cell)) go.markProposal(item.cell, false);
+  if (!item.structure && !pendingCells().has(item.cell)) go.markProposal(item.cell, false);
 }
 
 function decideAll(batch, accept) {

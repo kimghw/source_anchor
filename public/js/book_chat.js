@@ -1,26 +1,32 @@
 // 보고서 화면 2열 — 보고서 에이전트. 주제로 초기 목차를 제안하고, 장 사이에 다르게 쓴 용어·표기와 겹치는 내용·자료를 찾아 편별을 제안한다.
 // 본문은 쓰지 않는다 — 본문은 장의 작성 화면에서 그 장의 에이전트와 쓴다 (FR-WB-076, 077).
-// 목차·지시문은 직접 바꾸지 않고 목차 수정안(장 추가·제목·지시문·순서·삭제) 한 건씩으로 내며, 작성자가 건마다 반영하거나 거부한다.
+// 목차·지시문은 직접 바꾸지 않고 목차 수정안(장 추가·제목·지시문·순서·삭제) 한 건씩으로 내며, 작성자가 건마다 반영·거부하거나 추가의견을 보낸다.
+// 반영 의견·거부 사유·추가의견은 작성요령 「수정안 검토 의견」에 한 줄씩 남겨 에이전트가 참조한다 (FR-WB-103 — 칸과 기록은 toc_review.js).
 // 대상 장이 이미 없어진 수정안은 반영하지 않고 그렇게 표시한다 (ERR-WB-007).
+// 대화는 답이 끝날 때마다 서버가 보관하고, 「새 대화」로 닫을 때 장·주제로 분류하며 「지난 대화」에서 다시 열어 이어 간다 (FR-WB-101 — book_chat_history.js).
 // 채팅 부품(스트림·Markdown·사용량 표시)은 chat.js 의 것을 함께 쓴다. book.js 가 이 모듈을 부르므로 book.js 를 import 하지 않는다 — 화면 조작은 handlers 로 받는다.
 import { parseInstructions, SECTIONS } from '../shared/instructions.js';
 import { moveAfter } from '../shared/toc.js';
+import { chatHistory, classifyDialog, listChats, openChat } from './book_chat_history.js';
 import { collapseButton } from './columns.js';
 import { describeUsage, modelOptions, renderMarkdown, streamChat, TOOL_LABELS } from './chat.js';
 import { api } from './state.js';
+import { noteCard } from './note_cards.js';
 import { diffText } from './suggest.js';
+import { recordReview, reviewPanel, reviewResult, reviewWhat, reviewWhatAll } from './toc_review.js';
 import { fill, h, toast } from './util.js';
 
-let log, input, sendBtn, modelSelect, ctxMeter;
+let log, form, input, sendBtn, modelSelect, ctxMeter, history, historyBtn;
 const go = { bookChanged: () => {}, reload: async () => {}, showChapter: () => {}, showSource: () => {}, openChapter: async () => {}, running: () => {} };
 let view = { book: { id: null, title: '' }, chapters: [] };
 let conversationId = null;
+let chatId = null; // 이 대화가 보관된 번호 — 첫 답이 끝나면 서버가 알려 준다 (FR-WB-101)
 let running = false;
 let abort = null;
 let lastModel = null;
 let models = [];
 let usageByModel = {}; // 이 대화에서 응답한 모델별 컨텍스트 사용량 (FR-WB-058)
-let batches = []; // 목차 수정안 묶음 [{ id, model, items: [{ …, decision: 'pending' | 'accepted' | 'rejected' | 'gone' }] }]
+let batches = []; // 목차 수정안 묶음 [{ id, model, review?, reviewed?, items: [{ …, decision: 'pending' | 'accepted' | 'rejected' | 'gone' | 'stale' | 'commented', review?, reviewed? }] }] — review·reviewed 는 toc_review.js
 
 const SUGGESTIONS = [
   { label: '용어와 표기를 일관되게', text: '장 사이에 같은 대상을 다르게 쓴 용어·표기·단위를 찾아 어느 장이 어떻게 썼는지 알려 줘' },
@@ -34,14 +40,19 @@ export function initBookChat(root, handlers) {
   modelSelect = h('select.model-select', { title: '보고서 에이전트 모델', 'aria-label': '보고서 에이전트 모델', onchange: () => { renderUsage(); try { localStorage.setItem('sa.model', modelSelect.value); } catch { /* 저장하지 못해도 이번 대화에는 적용된다 */ } } });
   ctxMeter = h('span.ctx-meter', { hidden: true });
   log = h('div.chat-log');
+  history = chatHistory({ ctx: () => ({ bookId: view.book.id, chatId, chapters: view.chapters, model: modelSelect.value, modelLabel: modelLabel(modelSelect.value) }), open: openPast });
   input = h('textarea', { rows: 2, 'aria-label': '보고서 에이전트에게 요청', placeholder: '보고서 주제나 검토할 내용을 알려주세요…' });
   sendBtn = h('button.btn', { type: 'submit' }, '보내기');
-  const form = h('form.composer', { onsubmit: event => { event.preventDefault(); running ? stop() : send(input.value); } }, h('div.composer-row', input, sendBtn),
+  form = h('form.composer', { onsubmit: event => { event.preventDefault(); running ? stop() : send(input.value); } }, h('div.composer-row', input, sendBtn),
     h('div.composer-hint', h('span', '목차와 지시문을 함께 정리하세요'), h('span', '↵ 전송 · Shift + ↵ 줄바꿈')));
   root.append(
     h('header.col-head',
       h('div.col-title', h('span.col-index', '2'), '에이전트', modelSelect, ctxMeter),
-      h('div.col-head-actions', h('button.btn.small.ghost', { type: 'button', onclick: newChat }, '새 대화'), collapseButton(root, '2열 에이전트'))),
+      h('div.col-head-actions',
+        historyBtn = h('button.btn.small.ghost', { type: 'button', title: '이 보고서에 보관된 대화를 장별·주제별로 보고 다시 열어 이어 갑니다', onclick: () => showHistory(!history.isOpen()) }, '지난 대화'),
+        h('button.btn.small.ghost', { type: 'button', title: '지금 대화를 닫고 새로 시작합니다 — 문답이 있으면 장·주제로 분류해 보관합니다', onclick: async () => { if (await closeChat()) newChat(); } }, '새 대화'),
+        collapseButton(root, '2열 에이전트'))),
+    history.el,
     log,
     form,
   );
@@ -60,10 +71,13 @@ export function initBookChat(root, handlers) {
 export function setBookView(next) {
   const changed = next.book.id !== view.book.id;
   view = { book: next.book, chapters: next.chapters || [] };
-  if (changed) newChat();
-  else {
+  if (changed) {
+    newChat(); // 앞 보고서의 대화는 보관된 채 남는다 (FR-WB-101 (a))
+    showHistory(false);
+  } else {
     renderWelcome();
     renderTocCards();
+    if (history.isOpen()) history.redraw();
   }
 }
 
@@ -94,12 +108,64 @@ function renderUsage() {
 function newChat() {
   if (running) stop();
   conversationId = null;
+  chatId = null;
   lastModel = null;
   usageByModel = {};
   batches = [];
   renderUsage();
   log.replaceChildren(h('div.chat-welcome'));
   renderWelcome();
+}
+
+// 지금 대화를 닫는다 — 보관된 문답이 있으면 닫기 창에서 장·주제로 분류해 보관하거나 버린다. 취소하면 false (FR-WB-101 (b))
+async function closeChat() {
+  if (running) stop(); // 답하던 요청은 문답에 들지 않는다
+  if (!chatId || !view.book.id) return true;
+  let chats;
+  try {
+    chats = await listChats(view.book.id);
+  } catch (err) {
+    toast(err.message, 'error');
+    return false;
+  }
+  const chat = chats.find(c => c.id === chatId);
+  if (!chat) return true; // 그사이 지워졌다
+  const result = await classifyDialog({ bookId: view.book.id, chat, chats, chapters: view.chapters, model: modelSelect.value, modelLabel: modelLabel(modelSelect.value) });
+  if (result && history.isOpen()) history.refresh();
+  return result !== null;
+}
+
+// 지난 대화를 2열에 다시 연다 — 지금 대화를 먼저 닫고, 질문과 답의 글을 그대로 보인다. 이어 보내면 서버가 앞선 문답을 맥락으로 준다 (FR-WB-101 (d))
+async function openPast(id) {
+  if (id === chatId) return showHistory(false);
+  if (!(await closeChat())) return;
+  let data;
+  try {
+    data = await openChat(view.book.id, id);
+  } catch (err) {
+    toast(err.message, 'error');
+    if (err.status === 404) history.refresh();
+    return;
+  }
+  newChat();
+  conversationId = data.conversationId;
+  chatId = data.chat.id;
+  fill(log,
+    h('div.notice', `지난 대화 「${data.chat.title}」를 다시 열었습니다. 이어서 보내면 앞선 문답을 맥락으로 이어받아 답합니다.`),
+    data.chat.messages.map(m => (m.role === 'user' ? h('div.msg.msg-user', h('div.msg-text', m.text))
+      : h('div.msg.msg-agent', h('div.msg-model', modelLabel(m.model)), m.text && h('div.msg-text', renderMarkdown(m.text, bookLinks)),
+        m.blocks > 0 && h('div.notice', '이 답에 있던 수정안 카드는 지난 대화에서 다시 열리지 않습니다 — 필요하면 다시 요청하세요.')))));
+  showHistory(false);
+  scrollToEnd();
+}
+
+// 지난 대화 목록을 대화 기록 자리에 펼치거나 접는다 — 펼친 동안에는 보내기 칸을 감춘다
+function showHistory(visible) {
+  history.show(visible);
+  log.hidden = visible;
+  form.hidden = visible;
+  historyBtn.textContent = visible ? '대화로 돌아가기' : '지난 대화';
+  historyBtn.classList.toggle('is-on', visible);
 }
 
 // 안내와 제안 — 장이 없는 보고서에서는 목차 요청부터 (FR-WB-072)
@@ -138,6 +204,7 @@ async function send(text) {
   let raw = '';
   const handlers = {
     start: ev => { conversationId = ev.conversationId; },
+    chat: ev => { chatId = ev.chatId; }, // 답을 보관한 번호 (FR-WB-101 (a))
     text_start: () => { raw = ''; textEl = h('div.msg-text'); bubble.append(textEl); },
     text: ev => { raw += ev.d; textEl.replaceChildren(...renderMarkdown(raw, bookLinks)); },
     tool: ev => bubble.append(h('div.tool', h('span.tool-name', TOOL_LABELS[ev.name] || ev.name), h('span.tool-summary', ev.summary || ''))),
@@ -147,6 +214,7 @@ async function send(text) {
       renderTocCards();
     },
     hits: ev => bubble.append(hitsCard(ev)),
+    guides: ev => bubble.append(noteCard(ev, { saved: () => go.reload() })), // 작성요령 저장 카드 — 저장하면 3열 기준 문서 목록을 다시 받는다 (FR-WB-100)
     notice: ev => bubble.append(h('div.notice', ev.text)),
     usage: ev => { usageByModel[ev.model] = ev; renderUsage(); },
     error: ev => bubble.append(h('div.notice.is-error', ev.message)),
@@ -154,7 +222,7 @@ async function send(text) {
 
   try {
     abort = new AbortController();
-    await streamChat({ conversationId, text, model, bookId: view.book.id }, abort.signal, ev => {
+    await streamChat({ conversationId, chatId, text, model, bookId: view.book.id }, abort.signal, ev => {
       handlers[ev.t]?.(ev);
       bubble.append(typing);
       scrollToEnd();
@@ -180,6 +248,7 @@ function setRunning(value) {
   sendBtn.textContent = value ? '중지' : '보내기';
   sendBtn.classList.toggle('danger', value);
   modelSelect.disabled = value;
+  renderTocCards(); // 답하는 중에는 추가의견을 보낼 수 없다 (FR-WB-103)
 }
 
 function scrollToEnd() {
@@ -233,21 +302,29 @@ function onLogClick(event) {
     if (rest.startsWith('T-')) return go.openChapter(chapterId, rest);
     return go.showSource(chapterId, rest.split('.')[0], rest.includes('.') ? rest : null);
   }
+  // 반영·거부·추가의견은 먼저 의견 칸을 연다 — 결정은 칸에서 한다 (FR-WB-103)
   const all = event.target.closest('[data-decide-all]');
-  if (all) return decideAll(batchOf(all), all.dataset.decideAll === 'ok');
+  if (all) return openReview(batchOf(all), all.dataset.decideAll);
   const button = event.target.closest('[data-decide]');
   if (!button) return;
   const batch = batchOf(button);
-  const item = batch?.items.find(i => i.id === button.closest('[data-item]')?.dataset.item);
-  if (item) decide(batch, item, button.dataset.decide === 'ok');
+  openReview(batch?.items.find(i => i.id === button.closest('[data-item]')?.dataset.item), button.dataset.decide);
 }
+
+// 선택 질문 창(ask.js — app.js 가 이어 준다)이 이 채팅에서 띄울 때 쓰는 부품: 보고서, 고른 모델, 장 표시가 붙은 ID 링크와 그 클릭 (FR-WB-102)
+export const bookAsk = {
+  scope: () => (view.book.id ? { bookId: view.book.id } : null),
+  models: () => ({ model: modelSelect.value, models }),
+  render: raw => renderMarkdown(raw, bookLinks),
+  click: onLogClick,
+};
 
 const batchOf = node => batches.find(b => b.id === node.closest('[data-batch]')?.dataset.batch);
 
 // ───────────────────────────── 목차 수정안 카드 ─────────────────────────────
 
 const TOC_OP = { add: '장 추가', rename: '제목 변경', instructions: '지시문 변경', report_instructions: '보고서 공통 지시문 변경', move: '순서 변경', delete: '장 삭제' };
-const DECISION = { accepted: '반영됨', rejected: '거부됨', gone: '대상 장이 없어져 반영하지 않았습니다', stale: '수정안을 낸 뒤 지시문이 달라져 반영하지 않았습니다 — 다시 요청하세요' };
+const DECISION = { accepted: '반영됨', rejected: '거부됨', gone: '대상 장이 없어져 반영하지 않았습니다', stale: '수정안을 낸 뒤 지시문이 달라져 반영하지 않았습니다 — 다시 요청하세요', commented: '추가의견을 보냈습니다 — 반영하지 않고 에이전트의 고친 수정안을 기다립니다' };
 const exists = id => view.chapters.some(ch => ch.id === id);
 // 지시문 변경 수정안은 낼 때의 지시문(before)을 기준으로 한다 — 그 뒤 작성자가 고쳤으면 반영하지 않는다 (ERR-WB-009)
 const isStale = item => (item.op === 'report_instructions' && (item.before || '') !== (view.book.instructions || ''))
@@ -267,16 +344,18 @@ function renderTocCards() {
     const pending = batch.items.filter(i => i.decision === 'pending');
     fill(card,
       h('div.proposal-head',
-        h('span', `${batch.model} 목차 수정안 ${batch.items.length}건`, pending.length < batch.items.length && h('span.muted', ` · 남은 검토 ${pending.length}건`)),
+        h('span', h('span.kind-chip', { title: '보고서 내용(장 구성·다룰 내용·범위·순서)에 관한 수정안 — 쓰는 규칙은 작성요령 저장 카드로 옵니다' }, '내용'), `${batch.model} 목차 수정안 ${batch.items.length}건`, pending.length < batch.items.length && h('span.muted', ` · 남은 검토 ${pending.length}건`)),
         pending.length > 1 && h('span.proposal-head-actions',
-          h('button.btn.small', { type: 'button', dataset: { decideAll: 'ok' } }, '모두 반영'),
-          h('button.btn.small.ghost', { type: 'button', dataset: { decideAll: 'no' } }, '모두 거부'))),
-      batch.items.map(tocItem),
+          h('button.btn.small', { type: 'button', dataset: { decideAll: 'accept' } }, '모두 반영'),
+          h('button.btn.small.ghost', { type: 'button', dataset: { decideAll: 'reject' } }, '모두 거부'))),
+      batch.review && pending.length > 1 && reviewPanel(batch, { submit: comment => decideAll(batch, batch.review === 'accept', comment), cancel: () => openReview(batch, null) }),
+      reviewResult(batch),
+      batch.items.map(item => tocItem(batch, item)),
       pending.length > 0 && h('div.proposal-foot', '반영하기 전에는 목차와 지시문이 바뀌지 않습니다. 반영한 장 추가·삭제는 실행 취소할 수 없습니다.'));
   }
 }
 
-function tocItem(item) {
+function tocItem(batch, item) {
   let body;
   const stale = item.decision === 'pending' && isStale(item);
   if (item.op === 'add') body = [h('div.proposal-text', h('strong', item.title), h('span.muted', ` · 수준 ${item.level} · ${whereText(item)}`)), item.instructions && h('details.toc-instr-details', { open: item.instructions.length <= 600 }, h('summary', `지시문 ${item.instructions.length.toLocaleString()}자`), h('div.toc-instr', item.instructions))];
@@ -289,11 +368,16 @@ function tocItem(item) {
     h('div.change-head', h('span.op-badge', { class: `toc-${item.op}` }, TOC_OP[item.op])),
     body,
     item.reason && h('div.change-reason', item.reason),
-    item.decision === 'pending'
-      ? h('div.change-actions',
-        h('button.btn.small', { type: 'button', dataset: { decide: 'ok' }, disabled: stale }, '✓ 반영'),
-        h('button.btn.small.ghost', { type: 'button', dataset: { decide: 'no' } }, '✕ 거부'))
-      : h('div.change-decision', { class: ['gone', 'stale'].includes(item.decision) ? `is-${item.decision}` : '' }, DECISION[item.decision]));
+    item.decision !== 'pending' ? [h('div.change-decision', { class: ['gone', 'stale'].includes(item.decision) ? `is-${item.decision}` : '' }, DECISION[item.decision]), reviewResult(item)]
+      : item.review ? reviewPanel(item, {
+        submit: comment => (item.review === 'comment' ? sendComment(item, comment) : decide(batch, item, item.review === 'accept', comment)),
+        cancel: () => openReview(item, null),
+        blocked: item.busy ? '반영하는 중입니다' : item.review === 'accept' && stale ? '지시문이 수정안을 낸 뒤 달라져 반영할 수 없습니다' : item.review === 'comment' && running ? '에이전트가 답하는 중에는 추가의견을 보낼 수 없습니다' : '',
+      })
+      : h('div.change-actions',
+        h('button.btn.small', { type: 'button', dataset: { decide: 'accept' }, disabled: stale }, '✓ 반영'),
+        h('button.btn.small.ghost', { type: 'button', dataset: { decide: 'reject' } }, '✕ 거부'),
+        h('button.btn.small.ghost', { type: 'button', dataset: { decide: 'comment' }, title: '반영·거부하지 않고 이 수정안에 대한 의견을 에이전트에게 보내 고친 수정안을 받습니다' }, '💬 추가의견')));
 }
 
 // 지시문 변경 — 절마다 나눠 바뀐 절만 diff 로 보여 주고, 너무 긴 절은 diff 대신 전후 전문으로 보여 준다(diffText 는 글자 수의 곱만큼 일한다) (FR-WB-073, 076)
@@ -319,35 +403,78 @@ function instructionsDiff(before, after) {
 
 const CANCELLED = Symbol('cancelled');
 
-async function decide(batch, item, accept) {
-  if (item.decision !== 'pending') return;
+// 의견 칸을 연다(kind: 'accept' | 'reject' | 'comment') · 닫는다(null)
+function openReview(target, kind) {
+  if (!target) return;
+  target.review = kind;
+  renderTocCards();
+}
+
+// comment: 칸에 적은 반영 의견·거부 사유 — 반영하지 못하면(실패·취소·ERR-WB-007·009) 남기지 않는다 (FR-WB-103 (a))
+async function decide(batch, item, accept, comment = '') {
+  if (item.decision !== 'pending' || item.busy) return;
   if (!accept) {
-    item.decision = 'rejected';
-    return renderTocCards();
+    Object.assign(item, { decision: 'rejected', review: null });
+    renderTocCards();
+    return keepReview(item, 'reject', comment);
   }
   if (targetGone(item)) {
-    item.decision = 'gone';
+    Object.assign(item, { decision: 'gone', review: null });
     return renderTocCards();
   }
   if (isStale(item)) { // 그 사이 작성자가 지시문을 고쳤다 — 옛 전문으로 덮어쓰지 않는다 (ERR-WB-009)
-    item.decision = 'stale';
+    Object.assign(item, { decision: 'stale', review: null });
     return renderTocCards();
   }
+  item.busy = true;
   try {
     const data = await apply(item);
     if (data === CANCELLED) return;
-    item.decision = 'accepted';
+    Object.assign(item, { decision: 'accepted', review: null });
     if (data) go.bookChanged(data); // 보고서 상태를 다시 그린다 — 그때 setBookView 가 카드도 다시 그린다
     else await go.reload();
   } catch (err) {
     toast(err.message, 'error');
+  } finally {
+    item.busy = false;
   }
   renderTocCards();
+  if (item.decision === 'accepted') await keepReview(item, 'accept', comment);
 }
 
-async function decideAll(batch, accept) {
+// 「모두 반영」·「모두 거부」 — 의견은 그렇게 결정된 수정안 전체에 대한 한 줄로 남긴다
+async function decideAll(batch, accept, comment = '') {
   if (!batch) return;
-  for (const item of batch.items) if (item.decision === 'pending') await decide(batch, item, accept);
+  batch.review = null;
+  const decided = [];
+  for (const item of batch.items) {
+    if (item.decision !== 'pending') continue;
+    await decide(batch, item, accept);
+    if (item.decision === (accept ? 'accepted' : 'rejected')) decided.push(item);
+  }
+  renderTocCards();
+  if (decided.length) await keepReview(batch, accept ? 'accept' : 'reject', comment, reviewWhatAll(decided, item => TOC_OP[item.op]));
+}
+
+// 추가의견 — 그 수정안을 반영하지 않은 채 닫고 종류·대상과 의견을 같은 대화로 보낸다. 에이전트는 고친 목차 수정안이나 작성요령 저장 수정안으로 답한다 (FR-WB-103 (b))
+function sendComment(item, comment) {
+  if (running || !comment) return;
+  const what = reviewWhat(item, TOC_OP[item.op]);
+  Object.assign(item, { decision: 'commented', review: null });
+  const draft = input.value; // 입력창에 쓰던 글은 그대로 둔다
+  send(`목차 수정안 [${what}]에 대한 추가의견: ${comment}`);
+  input.value = draft;
+  return keepReview(item, 'comment', comment, what);
+}
+
+// 적은 의견을 작성요령 「수정안 검토 의견」에 남긴다 — 남기지 못해도 결정은 그대로이고 사유를 카드에 보인다 (FR-WB-103 (c), ERR-WB-017)
+async function keepReview(target, action, comment, what = reviewWhat(target, TOC_OP[target.op])) {
+  if (!comment) return;
+  target.reviewed = { action, comment, saving: true };
+  renderTocCards();
+  Object.assign(target.reviewed, await recordReview(view.book.id, action, what, comment), { saving: false });
+  if (target.reviewed.noted) await go.reload(); // 3열 작성요령 목록을 다시 받는다 — 그때 카드도 다시 그린다
+  renderTocCards();
 }
 
 // 수정안 한 건을 서버에 반영한다 → 새 보고서 상태 (장 삭제는 null — 상태를 다시 받는다)

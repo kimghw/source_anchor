@@ -10,6 +10,7 @@
 - `dragenter`/`dragleave` 는 자식 요소를 드나들 때마다 발생한다. 영역 단위 강조는 진입 횟수를 세거나 `relatedTarget` 을 봐야 깜박이지 않는다.
 - `draggable` 요소 안의 글은 마우스로 부분 선택할 수 없다.
 - 합성 `DragEvent`(`new DragEvent(type, { dataTransfer: new DataTransfer(), clientX, clientY })`)로 핸들러 로직을 자동 확인할 수 있다 (확인). 실제 OS 끌기와 달리 `setDragImage` 는 아무 일도 하지 않는다.
+- 헤드리스에서 `draggable` 요소의 **진짜 끌기**를 확인하려면 CDP `Input.setInterceptDrags({ enabled: true })` 뒤 `Input.dispatchMouseEvent` 로 누르고(mousePressed) 몇 번 옮기면(mouseMoved, `buttons: 1`) `Input.dragIntercepted` 이벤트로 끌기 자료(`dragstart` 에서 `setData` 한 사용자 형식 포함)가 온다. 그 자료로 `Input.dispatchDragEvent`(`dragEnter`·`dragOver`·`drop`, 좌표)를 보내면 페이지의 dragover·drop 핸들러가 실제처럼 돈다(2026-10-22 Edge 헤드리스로 확인). 끝나면 mouseReleased 와 `setInterceptDrags(false)`.
 
 ## 여러 줄에 걸친 inline 문장의 위치 계산
 
@@ -50,3 +51,10 @@
 - CDP 로 키를 흉내 낼 때 `Input.dispatchKeyEvent` 의 `code` 는 문자열(`'Enter'`)이어야 한다. 숫자를 주면 오류 응답만 오고 이벤트는 조용히 발생하지 않는다(응답의 `error` 를 확인할 것). Shift 는 `modifiers: 8`.
 - (2026-09-22 확인) iframe 안 PDF 보기는 `src` 의 조각(`#page=N`)만 바뀌면 옮겨 가지 않는다. 같은 iframe 을 `about:blank` 로 비웠다가 다시 넣어도(헤드리스 Edge 에서) 그려지지 않았고, **iframe 요소를 새로 만들어 갈아 끼우면** 그 쪽(형광 포함)이 열린다. 웹 스냅샷(sandbox iframe)은 조각(`#id`)만 바꿔도 같은 문서 안에서 그 자리로 간다.
 - (2026-09-22 확인) 헤드리스 Edge 의 CDP `Page.captureScreenshot` 은 iframe 의 조각 탐색 직후 그 iframe 을 DOM 에서 떼어 내면 응답이 오지 않고 멈출 수 있다 — 자동 확인 스크립트는 CDP 명령마다 제한 시간을 두고, 스크린샷은 iframe 을 갈아 끼우기 전에 찍는다.
+
+## 컴퓨터의 파일 끌어다 놓기 (2026-10-21 Edge 헤드리스로 확인)
+
+- 바깥(탐색기)에서 온 끌기는 `dataTransfer.types` 에 `'Files'` 가 있다 — 화면 안 끌기(`setData` 로 만든 것)와는 이걸로 가른다. `dragover` 중에도 `types` 와 `files.length` 는 읽을 수 있고 파일 이름·내용은 `drop` 에서만 읽힌다.
+- 파일을 받으려면 `dragover` 에서 `preventDefault()` 해야 `drop` 이 발생한다. 아무 데서도 받지 않으면 브라우저가 그 파일로 페이지를 옮겨(PDF 는 뷰어로) 앱이 닫힌다 — `window` 의 `dragover`·`drop` 에서 `Files` 일 때 `preventDefault()` 로 막는다. 단 `<input type=file>` 위에 놓는 것은 막으면 입력란이 파일을 받지 못하므로 대상이 그 입력란이면 빼 둔다(모달 dialog 안이라도 이벤트는 window 까지 올라온다).
+- `input.files = dataTransfer.files` 로 끌어다 놓은 FileList 를 파일 입력란에 그대로 넣을 수 있다(Chromium·Firefox). `accept` 는 이때 검사되지 않는다.
+- CDP 확인: 페이지 안에서 `new DataTransfer()` 에 `items.add(new File([...], 'a.md'))` 하고 `new DragEvent('drop', { dataTransfer, bubbles: true, cancelable: true })` 를 `dispatchEvent` 하면 실제 놓기와 같은 경로를 탄다(`types` 에 `Files` 가 들어가고 `files` 도 찬다). `dispatchEvent` 의 반환값이 false 면 `preventDefault` 된 것이다.

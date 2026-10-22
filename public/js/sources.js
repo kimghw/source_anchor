@@ -2,6 +2,7 @@
 import { anchorText, blockLoc, SOURCE_TYPES } from '../shared/model.js';
 import { collapseButton } from './columns.js';
 import { startDrag } from './dnd.js';
+import { previewUrl } from './md_preview.js';
 import { revealSentences } from './editor.js';
 import { noteDialog, readerPane } from './source_view.js';
 import { api, attach, citedAnchors, flushSave, inSourceOrder, insertAnchors, linkAnchors, on, primarySentence, selectAnchor, selectDoc, setSources, state } from './state.js';
@@ -255,12 +256,12 @@ function onClick(event) {
 
 const fileUrl = (source, kind) => `/api/sources/${encodeURIComponent(source.id)}/${kind}?doc=${encodeURIComponent(state.doc.id)}`;
 
-// 보관한 원본과 Markdown 파일을 새 탭에서 연다 (FR-PL-011) — 붙여 넣은 원문에는 내려받은 원본이 없다
+// 보관한 원본과 Markdown 파일을 새 탭에서 연다 (FR-PL-011) — 붙여 넣은 원문에는 내려받은 원본이 없다. Markdown 은 미리보기(md_view.html)로 연다
 function fileLinks(source) {
-  const link = (kind, label, title) => h('a.btn.small.ghost', { href: fileUrl(source, kind), target: '_blank', rel: 'noopener noreferrer', title }, label);
+  const link = (href, label, title) => h('a.btn.small.ghost', { href, target: '_blank', rel: 'noopener noreferrer', title }, label);
   return [
-    source.snapshot && link('original', `원본 열기 (${source.snapshot.split('.').pop()})`, '수집할 때 내려받아 보관한 원본 파일을 엽니다'),
-    link('markdown', 'Markdown 열기', '원본과 함께 보관한 Markdown 파일을 엽니다'),
+    source.snapshot && link(fileUrl(source, 'original'), `원본 열기 (${source.snapshot.split('.').pop()})`, '수집할 때 내려받아 보관한 원본 파일을 엽니다'),
+    link(previewUrl(fileUrl(source, 'markdown'), source.title), 'Markdown 열기', '원본과 함께 보관한 Markdown 파일을 미리보기로 엽니다(그 탭에서 파일 그대로도 볼 수 있습니다)'),
   ];
 }
 

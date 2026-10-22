@@ -1,15 +1,19 @@
 // 2열 에이전트 채팅 — 모델을 골라 묻고, 에이전트가 낸 수정안을 문장·문단 단위로 반영하거나 거부한다.
+// 대화는 답이 끝날 때마다 서버가 그 장의 보고서에 보관하고, 「새 대화」로 닫을 때 분류하며 「지난 대화」에서 다시 열어 이어 간다 — 보고서 화면과 같은 보관 대화 (FR-WB-101 — book_chat_history.js).
 import { anchorLoc, anchorText, SOURCE_TYPES } from '../shared/model.js';
 import { SENTENCE_TYPES, STATUS } from '../shared/text.js';
+import { chatHistory, classifyDialog, listChats, openChat } from './book_chat_history.js';
 import { collapseButton } from './columns.js';
 import { dropZone, startDrag } from './dnd.js';
 import { revealSentences } from './editor.js';
 import { api, attach, detach, emit, findSentence, flushSave, insertAnchors, insertProposals, on, selectDoc, setSources, state } from './state.js';
+import { noteCard } from './note_cards.js';
 import { addBatch, blockKey, decide, diffText, markPlaced } from './suggest.js';
 import { fill, flash, h, toast } from './util.js';
 
-let log, input, sendBtn, chips, modelSelect, ctxMeter;
+let log, form, input, sendBtn, chips, modelSelect, ctxMeter, history, historyBtn;
 let conversationId = null;
+let chatId = null; // 이 대화가 보관된 번호 — 첫 답이 끝나면 서버가 알려 준다 (FR-WB-101)
 let running = false;
 let abort = null;
 let lastModel = null;
@@ -30,18 +34,21 @@ export function initChat(root) {
   modelSelect = h('select.model-select', { title: '에이전트 모델', 'aria-label': '에이전트 모델', onchange: () => { renderUsage(); try { localStorage.setItem('sa.model', modelSelect.value); } catch { /* 저장하지 못해도 이번 대화에는 적용된다 */ } } });
   ctxMeter = h('span.ctx-meter', { hidden: true });
   log = h('div.chat-log');
+  history = chatHistory({ ctx: () => ({ bookId: state.book?.id, chatId, chapters: state.docs, model: modelSelect.value, modelLabel: modelLabel(modelSelect.value) }), open: openPast });
   chips = h('div.chips');
   input = h('textarea', { rows: 2, 'aria-label': '에이전트에게 요청', placeholder: '조사할 주제나 다듬을 내용을 알려주세요…', title: '문장이나 원문을 끌어다 놓으면 함께 보냅니다.' });
   sendBtn = h('button.btn', { type: 'submit' }, '보내기');
-  const form = h('form.composer', { onsubmit: event => { event.preventDefault(); running ? stop() : send(input.value); } }, chips, h('div.composer-row', input, sendBtn),
+  form = h('form.composer', { onsubmit: event => { event.preventDefault(); running ? stop() : send(input.value); } }, chips, h('div.composer-row', input, sendBtn),
     h('div.composer-hint', h('span', '문장을 끌어와 함께 보내세요'), h('span', '↵ 전송 · Shift + ↵ 줄바꿈')));
   root.append(
     h('header.col-head',
       h('div.col-title', h('span.col-index', '2'), '에이전트', modelSelect, ctxMeter),
       h('div.col-head-actions',
+        historyBtn = h('button.btn.small.ghost', { type: 'button', title: '이 보고서에 보관된 대화(보고서 화면의 대화 포함)를 장별·주제별로 보고 다시 열어 이어 갑니다', onclick: () => showHistory(!history.isOpen()) }, '지난 대화'),
         h('button.btn.small.ghost', { type: 'button', title: '이 대화에서 갈라져 나온 별도 창에서 질문·답변만 주고받습니다. 이 대화에는 남지 않습니다.', onclick: () => emit('open-branch') }, '분기 질문'),
-        h('button.btn.small.ghost', { type: 'button', onclick: newChat }, '새 대화'),
+        h('button.btn.small.ghost', { type: 'button', title: '지금 대화를 닫고 새로 시작합니다 — 문답이 있으면 장·주제로 분류해 보관합니다', onclick: async () => { if (await closeChat()) newChat(); } }, '새 대화'),
         collapseButton(root, '2열 에이전트'))),
+    history.el,
     log,
     form,
   );
@@ -67,7 +74,7 @@ export function initChat(root) {
   on('attachments', renderChips);
   on('sources', renderChips);
   on('suggestions', renderChangeCards);
-  on('doc-opened', newChat); // 다른 문서를 열면 대화도 새로 시작한다
+  on('doc-opened', () => { newChat(); showHistory(false); }); // 다른 문서를 열면 대화도 새로 시작한다 — 앞 대화는 보관된 채 남는다 (FR-WB-101 (a))
   newChat();
   loadModels();
 }
@@ -119,6 +126,7 @@ function renderUsage() {
 function newChat() {
   if (running) stop();
   conversationId = null;
+  chatId = null;
   lastModel = null;
   usageByModel = {};
   renderUsage();
@@ -129,6 +137,58 @@ function newChat() {
     h('div.suggestions', (state.sources.length ? SUGGESTIONS : EMPTY_SUGGESTIONS).map((text, i) => h('button.suggestion', { type: 'button', title: text, onclick: () => send(text) },
       state.sources.length ? ['선택한 문장 검토하기', '문장에 근거 연결하기', '핵심 수치로 문단 쓰기'][i] : '이 주제로 자료 조사 시작하기'))),
     h('p.welcome-note', '수정안은 검토한 뒤 원하는 문장만 반영할 수 있습니다.')));
+}
+
+// 지금 대화를 닫는다 — 보관된 문답이 있으면 닫기 창에서 분류(장 칸은 이 장으로)해 보관하거나 버린다. 취소하면 false (FR-WB-101 (b))
+async function closeChat() {
+  if (running) stop(); // 답하던 요청은 문답에 들지 않는다
+  const bookId = state.book?.id;
+  if (!chatId || !bookId) return true;
+  let chats;
+  try {
+    chats = await listChats(bookId);
+  } catch (err) {
+    toast(err.message, 'error');
+    return false;
+  }
+  const chat = chats.find(c => c.id === chatId);
+  if (!chat) return true; // 그사이 지워졌다
+  const result = await classifyDialog({ bookId, chat, chats, chapters: state.docs, model: modelSelect.value, modelLabel: modelLabel(modelSelect.value), chapterId: state.doc.id });
+  if (result && history.isOpen()) history.refresh();
+  return result !== null;
+}
+
+// 지난 대화를 2열에 다시 연다 — 지금 대화를 먼저 닫고, 질문과 답의 글을 그대로 보인다. 이어 보내면 이 장의 에이전트가 앞선 문답을 맥락으로 받는다 (FR-WB-101 (d))
+async function openPast(id) {
+  if (id === chatId) return showHistory(false);
+  if (!(await closeChat())) return;
+  let data;
+  try {
+    data = await openChat(state.book.id, id, 'chapter');
+  } catch (err) {
+    toast(err.message, 'error');
+    if (err.status === 404) history.refresh();
+    return;
+  }
+  newChat();
+  conversationId = data.conversationId;
+  chatId = data.chat.id;
+  fill(log,
+    h('div.notice', `지난 대화 「${data.chat.title}」를 다시 열었습니다. 이어서 보내면 앞선 문답을 맥락으로 이어받아 이 장의 에이전트가 답합니다.`),
+    data.chat.messages.map(m => (m.role === 'user' ? h('div.msg.msg-user', h('div.msg-text', m.text))
+      : h('div.msg.msg-agent', h('div.msg-model', modelLabel(m.model)), m.text && h('div.msg-text', renderMarkdown(m.text)),
+        m.blocks > 0 && h('div.notice', '이 답에 있던 수정안 카드는 지난 대화에서 다시 열리지 않습니다 — 필요하면 다시 요청하세요.')))));
+  showHistory(false);
+  scrollToEnd();
+}
+
+// 지난 대화 목록을 대화 기록 자리에 펼치거나 접는다 — 펼친 동안에는 보내기 칸을 감춘다
+function showHistory(visible) {
+  history.show(visible);
+  log.hidden = visible;
+  form.hidden = visible;
+  historyBtn.textContent = visible ? '대화로 돌아가기' : '지난 대화';
+  historyBtn.classList.toggle('is-on', visible);
 }
 
 // ───────────────────────────── 첨부 ─────────────────────────────
@@ -172,6 +232,7 @@ async function send(text) {
   let raw = '';
   const handlers = {
     start: ev => { conversationId = ev.conversationId; },
+    chat: ev => { chatId = ev.chatId; }, // 답을 마쳐 보관됐다 (FR-WB-101 (a))
     text_start: () => { raw = ''; textEl = h('div.msg-text'); bubble.append(textEl); },
     text: ev => { raw += ev.d; textEl.replaceChildren(...renderMarkdown(raw)); },
     tool: ev => bubble.append(h('div.tool', h('span.tool-name', TOOL_LABELS[ev.name] || ev.name), h('span.tool-summary', ev.summary || ''))),
@@ -181,6 +242,7 @@ async function send(text) {
       renderChangeCards();
     },
     hits: ev => bubble.append(hitsCard(ev)),
+    guides: ev => bubble.append(noteCard(ev)), // 작성자 요청을 주제별 작성요령으로 저장하는 카드 — 장 화면에는 기준 문서 목록이 없다 (FR-WB-100)
     // 에이전트가 채택한 자료를 서버가 내려받아 등록했다 — 원문 열에 곧바로 반영한다 (그사이 다른 문서를 열었으면 건드리지 않는다)
     collected: ev => {
       if (ev.docId === state.doc.id) setSources(ev.sources);
@@ -196,7 +258,7 @@ async function send(text) {
   try {
     await flushSave(); // 에이전트는 서버에 저장된 보고서를 읽는다
     abort = new AbortController();
-    await streamChat({ conversationId, text, model, docId: state.doc.id, context: { selected: state.sel.doc, attachments } }, abort.signal, ev => {
+    await streamChat({ conversationId, text, model, docId: state.doc.id, chatId, chatBook: state.book?.id, context: { selected: state.sel.doc, attachments } }, abort.signal, ev => {
       handlers[ev.t]?.(ev);
       bubble.append(typing);
       scrollToEnd();

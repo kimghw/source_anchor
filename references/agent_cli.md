@@ -18,12 +18,21 @@
 - 세션 기록 파일: `~/.claude/projects/<cwd 를 `-` 로 바꾼 이름>/<session_id>.jsonl` (예: 보고서 에이전트 cwd `%TEMP%sourceanchor-agentook` → `C--Users-<user>-AppData-Local-Temp-sourceanchor-agent-book`). 줄마다 `type`(user·assistant·attachment·queue-operation·last-prompt …)과 `timestamp` 가 있고 `message.content` 에 text·thinking·tool_use·tool_result 가 든다. 에이전트가 실제로 무엇을 냈는지(답 끝의 블록 포함) 확인할 때 이 파일을 본다.
 - 턴 중간에 프로세스를 죽이면(`taskkill /T /F`) 생성 중이던 assistant 메시지는 세션 파일에 남지 않는다 — 화면에 스트리밍된 글은 있어도 기록엔 없다. 그 세션을 `--resume` 하면 CLI 가 열린 tool_result 를 닫으려고 합성 문답 `Continue from where you left off.` → `No response requested.`(stop_reason `stop_sequence`) 을 끼워 넣은 뒤 새 프롬프트를 보낸다 (2026-09-23 확인).
 - 이벤트(JSON 한 줄씩): `system/init`(session_id) → `stream_event`(Messages API 스트림 이벤트: `content_block_start`, `content_block_delta/text_delta` …) → `assistant`(완성된 메시지, `tool_use` 입력 포함) → `user`(tool_result) → `result`(`is_error`, `total_cost_usd`). `rate_limit_event` 가 끼어든다.
-- 모델 ID: `claude-fable-5-1`, `claude-opus-5`.
+- 모델 ID: `claude-fable-5-1`, `claude-opus-5`, `claude-opus-5-5`(2.1.286 에서 호출 확인 — `result.modelUsage` 의 contextWindow 1,000,000 · maxOutputTokens 128,000).
 - 컨텍스트 사용량: `assistant` 이벤트마다 `message.usage`(`input_tokens` · `cache_creation_input_tokens` · `cache_read_input_tokens` · `output_tokens`)가 있고, 넷을 더한 값이 그 호출 직후의 컨텍스트 크기다. `result` 의 `usage` 는 턴 합계다. 컨텍스트 창 크기는 `result.modelUsage["<모델 ID>"].contextWindow`(opus-5 는 1,000,000) — `modelUsage` 에는 CLI 가 곁들여 부르는 작은 모델(haiku)도 들어 있으므로 부른 모델 ID 로 골라 읽는다 (확인).
 - MCP: `--mcp-config <파일>`(`{"mcpServers": {"이름": {"command", "args", "env"} | {"type": "http", "url"}}}`) + `--strict-mcp-config`. `-p` 모드에서는 허용 목록에 없는 도구가 거절되므로 `--allowedTools` 에 `mcp__<서버이름>` 을 넣어야 호출된다(서버 단위 허용). `--tools` 는 내장 도구만 제한하고 MCP 도구에는 영향이 없다 (확인).
 - cwd 의 상위 폴더에 `CLAUDE.md` 가 있으면 읽힐 수 있으므로, 에이전트 작업 폴더는 저장소 밖에 둔다.
 - 한 번 답하고 끝나는 호출은 `--no-session-persistence` 를 붙이면 세션 파일을 남기지 않는다(`-p` 와 함께 동작 확인).
 - 서브에이전트: CLI 자체 기능으로는 `--agents <json>` + Task 도구가 있지만 Claude 계열 모델만 부를 수 있다. 다른 제공자의 모델까지 서브에이전트로 쓰려면 아래 "CLI 가 CLI 를 부르기"처럼 MCP 도구로 감싼다.
+
+## Read 도구로 PDF 읽기 (2026-10-22, CLI 2.1.286 · claude-opus-5-5 로 확인)
+
+- `-p` 모드에서 `--tools Read --allowedTools Read` 만 주어도 PDF 를 읽는다. 모델이 `Read({ file_path, pages: "1-20" })` 처럼 `pages`("시작-끝", 1부터)를 넘긴다.
+- 한 번에 **20쪽까지**. 21쪽을 요청하면 도구 오류(`is_error: true`) `<tool_use_error>Page range "1-21" exceeds maximum of 20 pages per request. Please use a smaller range.</tool_use_error>` 가 모델에게 돌아간다(프로세스는 정상 종료).
+- 도구 결과는 글 한 줄 `PDF pages extracted: N page(s) from <경로> (<크기>)` + **쪽마다 JPEG 그림 하나**(`image/jpeg`)다. PDF 의 글 층을 넘기지 않으므로 모델은 그림을 읽는다 — 옮긴 글을 검사하려면 pdftotext 같은 글 층 추출과 따로 비교해야 한다.
+- 분량(영문 선급 규칙, 표 포함, A4): 2쪽 22초 · 출력 2,735 토큰. 20쪽 161초 · 출력 23,808 토큰(64,655자) · 입력(그림 포함) 약 3만 토큰 · `total_cost_usd` 0.70(목록가). 20쪽을 한 응답에 Markdown 으로 내도 출력 한도 128,000 에 한참 못 미친다.
+- `result.usage.output_tokens_details.thinking_tokens` 에 생각 토큰 수가 따로 온다. `modelUsage` 에는 CLI 가 곁들여 부르는 작은 모델(`claude-haiku-4-5-20251001`)도 들어 있다.
+- `--include-partial-messages` 를 함께 주면 옮긴 Markdown 이 `stream_event` 의 `text_delta` 로 흘러온다(PDF 를 Read 로 읽는 턴도 같다). 모델이 도구를 부르기 전에 짧은 글을 먼저 낼 수 있어, 답을 받는 쪽은 첫 쪽 표시(`<!-- p.N -->`)부터 잘라 쓰는 편이 안전하다. 글 층이 단순한 합성 3쪽 PDF 는 8초에 끝났다(2026-10-22, CLI 2.1.286).
 
 ## CLI 가 CLI 를 부르기 (MCP 도구 안에서 다른 CLI 실행)
 
