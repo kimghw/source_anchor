@@ -1,6 +1,6 @@
 // 양식 1열의 구조 조절 — 제목·필드 줄의 수준(1~FORM_LEVEL_MAX)·종류(제목/필드) 조작, 아직 보내지 않은 구조 변경 묶음, 구조 규칙 머리줄·대화상자 (FR-WB-094, 095, DR-WB-009).
 // forms.js 의 위성 — forms.js 가 import 한다. 노드 갱신·다시 그리기·저장은 forms.js 가 맡고, 여기는 부품과 양식을 모르는 계산만 둔다.
-// 화면 모듈(book.js·documents.js·custom_docs.js·explorer.js·forms.js)을 import 하지 않는다.
+// 화면 모듈(book.js·documents.js·analysis.js·explorer.js·forms.js)을 import 하지 않는다.
 import { api } from './state.js';
 import { fill, formatDate, h, toast } from './util.js';
 

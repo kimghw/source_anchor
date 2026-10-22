@@ -50,6 +50,26 @@ test('에이전트가 읽는 보고서 상태: 목차 순서대로 장마다 지
   await fs.rm(process.env.WORKSPACE, { recursive: true, force: true });
 });
 
+test('장 화면 「보고서 전체」: remember: false 로 받은 보고서 상태에 모든 장의 원문(장 표시)과 기준 문서가 실리고, 마지막으로 보던 자리는 그 장으로 남는다 (FR-WB-104)', async () => {
+  const store = await freshStore();
+  const { book } = await store.loadBookState();
+  const a = (await store.insertChapter({ bookId: book.id, title: 'a' })).chapters[0];
+  const b = (await store.insertChapter({ bookId: book.id, title: 'b' })).chapters[1];
+  await store.addSource({ docId: a.id, title: '가 자료', type: 'text', markdown: '가 문장이다.' });
+  await store.addSource({ docId: b.id, title: '나 자료', type: 'text', markdown: '나 문장이다.' });
+  await store.addGuide({ bookId: book.id, kind: 'reference', title: '참고', markdown: '# 참고\n\n참고 문장이다.' });
+  await store.loadState(b.id); // 장 b 의 작성 화면을 연다
+  const before = await store.lastPlace();
+  assert.deepEqual([before.view, before.docId], ['chapter', b.id]);
+  const seen = await store.loadBookState(book.id, { remember: false });
+  assert.deepEqual(seen.sources.map(s => [s.chapterId, s.chapterTitle, s.title]), [[a.id, 'a', '가 자료'], [b.id, 'b', '나 자료']]);
+  assert.deepEqual(seen.guides.map(g => [g.kind, g.title]), [['reference', '참고']]);
+  assert.deepEqual(await store.lastPlace(), before);
+  await store.loadBookState(book.id); // 보고서 화면을 열면 자리가 보고서 화면으로 바뀐다
+  assert.equal((await store.lastPlace()).view, 'book');
+  await fs.rm(process.env.WORKSPACE, { recursive: true, force: true });
+});
+
 test('장 가져오기: 고른 제목들이 빈 장으로 목차 끝에 순서대로 붙고 수준은 규칙 안으로 — 제목은 정리·200자, level 은 정수 1~3 아니면 1', async () => {
   const store = await freshStore();
   const { book } = await store.loadBookState();

@@ -1,8 +1,8 @@
 // 0열 장 탐색기 — 보고서(뿌리)와 장들을 목차 순서·수준(헤딩 단계)대로 보여 준다. 장을 클릭하면 그 장의 본문(작성 화면)이,
 // 보고서를 클릭하면 보고서 화면이 열린다 (FR-WB-061, 074). 장의 순서(↑↓)·수준(⇤⇥)·추가·삭제도 여기서 한다 (FR-WB-072, 079).
-// 목차는 처음에 수준 1 장만 보이고, 장마다 펼침 표시(▸)나 모두 펼치기로 하위 장과 세부 장(본문의 제목)을 펼친다 (FR-WB-061).
-// "사용자 지정 문서" 탭은 원문들에서 뽑아 만든 문서의 목록이다 — 열기·새로 만들기·삭제 (FR-WB-088).
-// "장" 탭의 장 목차 아래에는 양식 묶음을 둔다 — 작업공간 공통이라 어느 보고서에서나 같은 목록. 올리기·열기·목차로 가져오기(⇪)·삭제 (FR-WB-090, 093).
+// 목차는 처음에 수준 1 장만 보이고, 장 번호·장 제목 클릭이나 모두 펼치기로 하위 장과 세부 장(본문의 제목)을 펼치고 접는다 (FR-WB-061).
+// 「데이터 분석」 탭은 그 보고서의 분석 목록이다 — 열기·새로 만들기·삭제, 에이전트가 답하는 중인 분석은 그렇게 표시한다 (FR-WB-088, 106).
+// 「목차」 탭의 장 목차 아래에는 양식 묶음을 둔다 — 작업공간 공통이라 어느 보고서에서나 같은 목록. 올리기·열기·목차로 가져오기(⇪)·삭제 (FR-WB-090, 093).
 // 네 화면이 함께 쓰므로 어느 화면 모듈도 import 하지 않는다 — 화면을 여는 진입점은 app.js 가 넘긴다.
 import { docHeadings } from '../shared/model.js';
 import { canDemote, canMoveDown, canMoveUp, canPromote, moveDown, moveUp, outlineNumbers, shiftLevel } from '../shared/toc.js';
@@ -11,10 +11,11 @@ import { api, emit, flushSave, on, state } from './state.js';
 import { fill, formatDate, h, toast } from './util.js';
 
 let root = null;
-let view = { book: null, chapters: [], current: null, custom: [], currentCustom: null, forms: [], currentForm: null }; // current: 열어 둔 장 ID(null 이면 보고서 화면) · currentCustom·currentForm: 열어 둔 사용자 지정 문서·양식 ID
-let tab = 'chapters'; // 0열 탭 — 'chapters' | 'custom' (FR-WB-088)
-const go = { openBook: async () => {}, openChapter: async () => {}, bookChanged: () => {}, reveal: () => {}, openCustom: async () => {}, newCustom: async () => {}, openForm: async () => {}, uploadForm: async () => {}, flushForm: async () => true, importToc: async () => {} };
-const action = (label, title, enabled, fn) => h('button.icon-btn', { type: 'button', title, disabled: !enabled, onclick: fn }, label);
+let view = { book: null, chapters: [], current: null, analyses: [], currentAnalysis: null, forms: [], currentForm: null }; // current: 열어 둔 장 ID(null 이면 보고서 화면) · currentAnalysis·currentForm: 열어 둔 분석·양식 ID
+let tab = 'chapters'; // 0열 탭 — 'chapters' | 'analyses' (FR-WB-088)
+// analysisBusy(보고서 ID, 분석 ID): 그 분석의 에이전트가 이 창에서 답하는 중인가 — analysis_chat.js 가 안다 (FR-WB-106 (e))
+const go = { openBook: async () => {}, openChapter: async () => {}, bookChanged: () => {}, reveal: () => {}, openAnalysis: async () => {}, newAnalysis: async () => {}, analysisBusy: () => false, openForm: async () => {}, uploadForm: async () => {}, flushForm: async () => true, importToc: async () => {} };
+const action = (label, title, enabled, fn) => h('button.icon-btn', { type: 'button', title, 'aria-label': title, disabled: !enabled, onclick: fn }, label);
 const expanded = new Set(); // 펼친 장 ID — 처음에는 수준 1 장만 보인다 (FR-WB-061)
 let revealed = null; // 마지막으로 위의 장들을 펼쳐 보인 열린 장 — 열린 장이 바뀔 때만 다시 펼친다
 let formsOpen = false; // 양식 묶음 펼침 — 처음에는 접혀 머리만 보인다 (FR-WB-090)
@@ -25,18 +26,19 @@ export function initExplorer(container, handlers) {
   root = container;
   Object.assign(go, handlers);
   // 작성 화면에서 자동 저장이 장 목록을 갱신하면 탐색기도 따라간다
-  on('docs', () => { if (view.current !== null) showExplorer({ book: state.book, chapters: state.docs, current: state.doc.id, custom: state.custom, forms: state.forms }); });
+  on('docs', () => { if (view.current !== null) showExplorer({ book: state.book, chapters: state.docs, current: state.doc.id, analyses: state.analyses, forms: state.forms }); });
   // 열어 둔 장에서 제목 블록이 생기거나 바뀌면 세부 항목도 바로 따라간다 (FR-WB-061)
   on('doc', () => { if (view.current !== null && JSON.stringify(docHeadings(state.doc)) !== headingKey) render(); });
   render();
 }
 
 // 화면이 바뀔 때마다 부른다 — chapters 는 서버의 장 목록([{ id, title, level, instructions, sentences, sources, updatedAt }]),
-// custom 은 사용자 지정 문서 요약 목록([{ id, title, picks, registrations, updatedAt }]), currentCustom 은 그 화면에서 열어 둔 문서,
+// analyses 는 데이터 분석 요약 목록([{ id, title, results, updatedAt }]), currentAnalysis 는 분석 화면에서 열어 둔 분석,
 // forms 는 양식 요약 목록([{ id, title, fileName, format, units, changed, updatedAt }]), currentForm 은 양식 화면에서 열어 둔 양식
-export function showExplorer({ book, chapters, current, custom, currentCustom, forms, currentForm }) {
-  view = { book, chapters: chapters || [], current: current ?? null, custom: custom || view.custom || [], currentCustom: currentCustom ?? null, forms: forms || view.forms || [], currentForm: currentForm ?? null };
-  if (view.currentCustom) tab = 'custom';
+export function showExplorer({ book, chapters, current, analyses, currentAnalysis, forms, currentForm }) {
+  const sameBook = view.book?.id === book?.id;
+  view = { book, chapters: chapters || [], current: current ?? null, analyses: analyses || (sameBook ? view.analyses : null) || [], currentAnalysis: currentAnalysis ?? null, forms: forms || view.forms || [], currentForm: currentForm ?? null };
+  if (view.currentAnalysis) tab = 'analyses';
   else if (view.current !== null || view.currentForm) tab = 'chapters';
   // 접힌 장 아래의 장이 열리면 그 위의 장들을 펼쳐 보이게 한다 — 그 뒤에 작성자가 접은 것은 그대로 둔다
   if (view.current !== null && view.current !== revealed) {
@@ -48,9 +50,15 @@ export function showExplorer({ book, chapters, current, custom, currentCustom, f
   render();
 }
 
+// 분석 화면이 목록·답하는 중 표시가 바뀔 때 부른다 — 열어 둔 화면은 그대로 두고 탐색기만 다시 그린다
+export function redrawExplorer(analyses) {
+  if (analyses) view.analyses = analyses;
+  render();
+}
+
 // ───────────────────────────── 그리기 ─────────────────────────────
 
-const onBook = () => view.current === null && !view.currentForm; // 보고서 화면(또는 사용자 지정 문서 화면) — 양식 화면도 장은 열려 있지 않다
+const onBook = () => view.current === null && !view.currentForm && !view.currentAnalysis; // 보고서 화면 — 양식·분석 화면도 장은 열려 있지 않다
 const sourceCount = ch => (view.current && ch.id === state.doc.id ? state.sources.length : ch.sources ?? 0);
 
 // 목차의 장마다 조상 장(수준 1부터)과 바로 아래 하위 장 수 — 장은 위의 장이 모두 펼쳐져 있어야 보인다 (FR-WB-061)
@@ -73,21 +81,20 @@ function render() {
   const tree = outlineTree(list);
   const holder = tree.find(it => it.ch.id === view.current)?.parents.find(p => !expanded.has(p.ch.id)); // 열어 둔 장을 접어 숨긴 가장 바깥 장
   const tabs = h('div.tree-tabs', { role: 'tablist' },
-    h('button', { type: 'button', role: 'tab', class: tab === 'chapters' ? 'is-on' : '', 'aria-selected': String(tab === 'chapters'), onclick: () => { tab = 'chapters'; render(); } }, `장 ${list.length}`),
-    h('button', { type: 'button', role: 'tab', class: tab === 'custom' ? 'is-on' : '', 'aria-selected': String(tab === 'custom'), title: '원문들에서 문장·표를 골라 넣어 만든 문서 — 장의 원문으로 등록할 수 있습니다', onclick: () => { tab = 'custom'; render(); } }, `사용자 지정 문서 ${view.custom.length}`));
-  if (tab === 'custom') {
+    h('button', { type: 'button', role: 'tab', class: tab === 'chapters' ? 'is-on' : '', 'aria-selected': String(tab === 'chapters'), onclick: () => { tab = 'chapters'; render(); } }, '목차', h('span.tree-tab-count', String(list.length))),
+    h('button', { type: 'button', role: 'tab', class: tab === 'analyses' ? 'is-on' : '', 'aria-selected': String(tab === 'analyses'), title: '데이터 분석 — 에이전트와 함께 기준 문서·원문을 분석해 결과를 JSON·YAML 등 파일로 남깁니다', onclick: () => { tab = 'analyses'; render(); } }, '데이터 분석', h('span.tree-tab-count', String(view.analyses.length))));
+  if (tab === 'analyses') {
     fill(root,
-      h('header.col-head', h('div.col-title', h('span.col-index', '0'), '사용자 지정 문서', h('span.count', String(view.custom.length))), h('div.col-head-actions', collapseButton(root, '0열 탐색기'))),
+      h('header.col-head', h('div.col-title', h('span.col-index', '0'), '탐색기'), h('div.col-head-actions', collapseButton(root, '0열 탐색기'))),
       tabs,
-      customList());
+      analysisList());
     return;
   }
   fill(root,
-    h('header.col-head', h('div.col-title', h('span.col-index', '0'), '장', h('span.count', String(list.length))), h('div.col-head-actions', collapseButton(root, '0열 장 탐색기'))),
+    h('header.col-head', h('div.col-title', h('span.col-index', '0'), '탐색기'), h('div.col-head-actions', collapseButton(root, '0열 장 탐색기'))),
     tabs,
     h('div.tree',
-      h('button.tree-root', { type: 'button', class: onBook() ? 'is-current' : '', title: '보고서 화면 — 목차·지시문, 기준 문서와 장별 원문', onclick: toBook },
-        h('span.book-kind', '보고서'),
+      h('button.tree-root', { type: 'button', class: onBook() ? 'is-current' : '', 'aria-current': onBook() ? 'page' : null, title: '보고서 화면 — 목차·지시문, 기준 문서와 장별 원문', onclick: toBook },
         h('span.tree-title', view.book?.title || '제목 없는 보고서')),
       list.length
         ? [foldTools(tree), tree.map((it, i) => (it.parents.every(p => expanded.has(p.ch.id)) ? [row(it, i, numbers[i], it === holder), expanded.has(it.ch.id) && subRows(it.ch)] : null))]
@@ -109,11 +116,11 @@ function formsGroup() {
 function formsList() {
   return [
     view.forms.map(f => h('div.tree-row.form-row', { class: f.id === view.currentForm ? 'is-current' : '' },
-      h('span.tree-fold.is-empty'),
-      h('button.tree-node', { type: 'button', title: f.id === view.currentForm ? '지금 열어 둔 양식' : `이 양식을 연다\n${f.fileName}`, onclick: () => openForm(f) },
-        h('span.tree-no', f.id),
-        h('span.tree-title', f.title || f.fileName),
-        h('span.tree-meta', `${f.format} · 단위 ${f.units ?? 0} · 바뀐 ${f.changed ?? 0} · ${formatDate(f.updatedAt)}`)),
+      h('button.tree-node.tree-file', { type: 'button', 'aria-current': f.id === view.currentForm ? 'page' : null, title: `${f.fileName || f.title}\n${f.id} · 단위 ${f.units ?? 0} · 수정 ${formatDate(f.updatedAt)}`, onclick: () => openForm(f) },
+        h('span.tree-file-icon', { 'aria-hidden': 'true' }),
+        h('span.tree-file-copy',
+          h('span.tree-title', f.title || f.fileName),
+          h('span.tree-meta', h('span.tree-format', (f.format || '').toUpperCase()), f.changed > 0 && h('span.tree-changed', `수정 ${f.changed}`)))),
       h('div.tree-actions',
         action('⇪', '목차로 가져오기 — 이 양식의 제목(헤딩)들을 장 후보로 골라 보고서의 장으로 만듭니다', true, () => go.importToc(view.book.id, f.id)),
         action('✕', '양식 삭제 — 올린 원본과 적은 값·지침이 함께 지워집니다', true, () => removeForm(f))))),
@@ -146,38 +153,42 @@ async function removeForm(f) {
   }
 }
 
-// 사용자 지정 문서 목록 — 열기·새로 만들기·삭제. 문서 화면은 custom_docs.js (FR-WB-088)
-function customList() {
-  return h('div.tree.tree-custom',
-    h('p.tree-hint', '원문들에서 문장·표를 골라 넣어 새 문서를 만들고, 장의 원문으로 등록해 근거로 쓸 수 있습니다.'),
-    view.custom.length
-      ? view.custom.map(doc => h('div.tree-row.custom-row', { class: doc.id === view.currentCustom ? 'is-current' : '' },
-        h('span.tree-fold.is-empty'),
-        h('button.tree-node', { type: 'button', title: doc.id === view.currentCustom ? '지금 열어 둔 문서' : '이 문서를 연다', onclick: () => openCustom(doc) },
-          h('span.tree-no', doc.id),
-          h('span.tree-title', doc.title || '제목 없는 문서'),
-          h('span.tree-meta', `출처 ${doc.picks ?? 0} · 등록 ${doc.registrations ?? 0} · ${formatDate(doc.updatedAt)}`)),
-        h('div.tree-actions', action('✕', '문서 삭제 — 등록한 원문은 장에 남습니다', true, () => removeCustom(doc)))))
-      : h('div.tree-empty', h('p', '아직 사용자 지정 문서가 없습니다.'), h('p.muted', '새 문서를 만들어 원문들에서 데이터를 뽑아 담으세요.')),
-    h('div.tree-add', h('button.btn.small', { type: 'button', onclick: newCustom }, '＋ 새 문서')));
+// 데이터 분석 목록 — 열기·새로 만들기·삭제. 분석 화면은 analysis.js (FR-WB-088). 답하는 중인 분석은 표시하고 지우지 못하게 한다 (ERR-WB-010)
+function analysisList() {
+  return h('div.tree.tree-analyses',
+    h('p.tree-hint', '에이전트와 함께 기준 문서·원문을 분석하고, 결과를 JSON·YAML 등 파일로 남깁니다. 보고서 본문은 바뀌지 않습니다.'),
+    view.analyses.length
+      ? view.analyses.map(a => {
+        const busy = go.analysisBusy(view.book?.id, a.id);
+        return h('div.tree-row.analysis-row', { class: `${a.id === view.currentAnalysis ? 'is-current' : ''}${busy ? ' is-busy' : ''}` },
+          h('button.tree-node.tree-file', { type: 'button', 'aria-current': a.id === view.currentAnalysis ? 'page' : null, title: `${a.title}\n${a.id} · 결과 파일 ${a.results ?? 0}개 · 수정 ${formatDate(a.updatedAt)}${busy ? '\n에이전트가 답하는 중입니다' : ''}`, onclick: () => openAnalysis(a) },
+            h('span.tree-file-icon', { 'aria-hidden': 'true' }),
+            h('span.tree-file-copy',
+              h('span.tree-title', a.title),
+              h('span.tree-meta', busy && h('span.tree-busy', '답하는 중'), `결과 ${a.results ?? 0}`))),
+          h('div.tree-actions', action('✕', busy ? '에이전트가 답하는 중에는 지울 수 없습니다' : '분석 삭제 — 문답과 결과 파일이 함께 지워집니다', !busy, () => removeAnalysis(a))));
+      })
+      : h('div.tree-empty', h('p', '아직 데이터 분석이 없습니다.'), h('p.muted', '새 분석을 만들어 에이전트에게 분석을 맡기세요.')),
+    h('div.tree-add', h('button.btn.small', { type: 'button', onclick: newAnalysis }, '＋ 새 분석')));
 }
 
-async function openCustom(doc) {
-  if (doc.id === view.currentCustom || !(await leaving())) return;
-  await go.openCustom(view.book?.id, doc.id);
+async function openAnalysis(a) {
+  if (a.id === view.currentAnalysis || !(await leaving())) return;
+  await go.openAnalysis(view.book?.id, a.id);
 }
 
-async function newCustom() {
+async function newAnalysis() {
   if (!(await leaving())) return;
-  await go.newCustom(view.book?.id);
+  await go.newAnalysis(view.book?.id);
 }
 
-async function removeCustom(doc) {
-  if (!confirm(`“${doc.title}” 문서를 삭제할까요? 되돌릴 수 없습니다. 이 문서로 등록한 원문은 장에 그대로 남습니다.`)) return;
+async function removeAnalysis(a) {
+  if (!confirm(`“${a.title}” 분석을 삭제할까요? 문답과 결과 파일 ${a.results ?? 0}개가 함께 지워지며 되돌릴 수 없습니다.`)) return;
   try {
-    const { custom } = await api('DELETE', `/api/books/${encodeURIComponent(view.book.id)}/custom/${encodeURIComponent(doc.id)}`);
-    view.custom = custom;
-    if (view.currentCustom === doc.id) return go.openBook(view.book.id); // 보던 문서를 지웠으면 보고서 화면으로
+    const { analyses } = await api('DELETE', `/api/books/${encodeURIComponent(view.book.id)}/analyses/${encodeURIComponent(a.id)}`);
+    view.analyses = analyses;
+    state.analyses = analyses; // 장 화면이 다시 그릴 때 쓰는 목록도 맞춘다
+    if (view.currentAnalysis === a.id) return go.openBook(view.book.id); // 보던 분석을 지웠으면 보고서 화면으로
     render();
   } catch (err) {
     toast(err.message, 'error');
@@ -187,10 +198,25 @@ async function removeCustom(doc) {
 // 모두 펼치기·모두 접기 — 하위 장이나 세부 장이 있는 장이 하나라도 있을 때만 (FR-WB-061)
 function foldTools(tree) {
   const foldable = tree.filter(it => it.kids || headingsOf(it.ch).length);
-  if (!foldable.length) return null;
-  return h('div.tree-tools',
+  return h('div.tree-section-head', h('span.tree-section-label', '장 목록'), foldable.length > 0 && h('div.tree-tools',
     h('button.btn.small.ghost', { type: 'button', title: '하위 장과 세부 장을 모두 펼칩니다', disabled: foldable.every(it => expanded.has(it.ch.id)), onclick: () => { for (const it of foldable) expanded.add(it.ch.id); render(); } }, '모두 펼치기'),
-    h('button.btn.small.ghost', { type: 'button', title: '수준 1 장만 남기고 모두 접습니다', disabled: !foldable.some(it => expanded.has(it.ch.id)), onclick: () => { expanded.clear(); render(); } }, '모두 접기'));
+    h('button.btn.small.ghost', { type: 'button', title: '수준 1 장만 남기고 모두 접습니다', disabled: !foldable.some(it => expanded.has(it.ch.id)), onclick: () => { expanded.clear(); render(); } }, '모두 접기')));
+}
+
+// 원본 제목은 보존하고 현재 목차 번호와 같은 접두어만 표시에서 뺀다. 1차·3D·연도는 제목 그대로다.
+function chapterTitle(title, number) {
+  const text = title?.trim() || '제목 없는 장';
+  const prefix = text.match(/^(\d+(?:[.-]\d+)*)(?:[.)](?!\d)\s*|\s+)(\S[\s\S]*)$/);
+  return prefix && prefix[1].replaceAll('-', '.') === number ? prefix[2] : text;
+}
+
+// 번호는 문서를 열지 않고 하위 항목만 토글한다. 다시 그린 뒤에도 같은 숫자로 계속 조작할 수 있다.
+function toggleNumber(id) {
+  const scrollTop = root.querySelector('.tree')?.scrollTop || 0;
+  if (!expanded.delete(id)) expanded.add(id);
+  render();
+  root.querySelector('.tree').scrollTop = scrollTop;
+  root.querySelector(`.tree-toggle[data-chapter="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
 }
 
 // holdsCurrent: 이 장이 접혀 그 아래에 열어 둔 장이 숨어 있다
@@ -200,14 +226,13 @@ function row({ ch, kids }, i, number, holdsCurrent) {
   const heads = headingsOf(ch).length;
   const isOpen = expanded.has(ch.id);
   const inside = [kids && `하위 장 ${kids}개`, heads && `세부 장 ${heads}개`].filter(Boolean).join(' · ');
-  return h('div.tree-row', { class: `lvl-${ch.level || 1}${current ? ' is-current' : ''}${holdsCurrent ? ' has-current' : ''}` },
+  return h('div.tree-row.chapter-row', { class: `lvl-${ch.level || 1}${current ? ' is-current' : ''}${holdsCurrent ? ' has-current' : ''}` },
     inside
-      ? h('button.tree-fold', { type: 'button', title: `${inside} ${isOpen ? '접기' : '펼치기'}`, 'aria-expanded': String(isOpen), onclick: () => { if (!expanded.delete(ch.id)) expanded.add(ch.id); render(); } }, isOpen ? '▾' : '▸')
-      : h('span.tree-fold.is-empty'),
-    // 장을 클릭하면 열면서 펼친다 — 이미 열어 둔 장이면 펼치기만 한다
-    h('button.tree-node', { type: 'button', title: current ? '지금 열어 둔 장' : holdsCurrent ? '이 장 아래에 지금 열어 둔 장이 있습니다 — 펼쳐서 볼 수 있습니다' : '이 장의 본문을 연다', onclick: () => { if (inside && !isOpen) { expanded.add(ch.id); render(); } openChapter(ch); } },
-      h('span.tree-no', number),
-      h('span.tree-title', ch.title || '제목 없는 장')),
+      ? h('button.tree-no.tree-toggle', { type: 'button', title: `${inside} ${isOpen ? '접기' : '펼치기'}`, 'aria-label': `${number} ${chapterTitle(ch.title, number)} — ${inside} ${isOpen ? '접기' : '펼치기'}`, 'aria-expanded': String(isOpen), dataset: { chapter: ch.id }, onclick: () => toggleNumber(ch.id) }, number)
+      : h('span.tree-no', number),
+    // 장을 클릭할 때마다 펼침·접힘을 바꾸고, 열어 두지 않은 장이면 연다 (FR-WB-061)
+    h('button.tree-node', { type: 'button', 'aria-current': current ? 'page' : null, title: `${ch.title || '제목 없는 장'}\n${current ? '지금 열어 둔 장' : holdsCurrent ? '이 장 아래에 지금 열어 둔 장이 있습니다' : '이 장의 본문을 연다'}${inside ? ` — 누르면 ${inside} ${isOpen ? '접기' : '펼치기'}` : ''}`, onclick: () => { if (inside) { if (!expanded.delete(ch.id)) expanded.add(ch.id); render(); } openChapter(ch); } },
+      h('span.tree-title', chapterTitle(ch.title, number))),
     h('div.tree-actions',
       action('↑', '위로 — 같은 수준의 앞 장과 자리를 바꿉니다 (하위 장도 함께)', canMoveUp(list, i), () => saveChapters(moveUp(list, i))),
       action('↓', '아래로 — 같은 수준의 다음 장과 자리를 바꿉니다 (하위 장도 함께)', canMoveDown(list, i), () => saveChapters(moveDown(list, i))),
@@ -283,12 +308,12 @@ async function saveChapters(list) {
 
 // 서버가 돌려준 보고서 상태(GET /api/book 과 같은 모양)를 지금 화면에 맞게 반영한다 — 목차 고치기와 목차 후보 가져오기(forms.js, FR-WB-093)가 쓴다
 export function applyBookData(data) {
-  if (view.currentForm || view.currentCustom) return showExplorer({ ...view, book: data.book, chapters: data.chapters, forms: data.forms }); // 양식·사용자 지정 문서 화면은 그대로 두고 탐색기만
+  if (view.currentForm || view.currentAnalysis) return showExplorer({ ...view, book: data.book, chapters: data.chapters, forms: data.forms }); // 양식·분석 화면은 그대로 두고 탐색기만
   if (view.current === null) return go.bookChanged(data); // 보고서 화면은 자기 상태를 바꾸고 다시 그린다 — 그때 탐색기도 다시 그려진다
   state.docs = data.chapters;
   if (state.book) state.book = { ...state.book, title: data.book.title, chapters: data.chapters };
   emit('docs');
-  showExplorer({ book: state.book, chapters: state.docs, current: state.doc.id, custom: state.custom, forms: state.forms });
+  showExplorer({ book: state.book, chapters: state.docs, current: state.doc.id, analyses: state.analyses, forms: state.forms });
 }
 
 // 장을 지우면 그 장의 원문도 함께 지워진다 — 먼저 확인을 받는다 (FR-WB-072)

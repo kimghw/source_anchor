@@ -37,7 +37,7 @@ Node 22 이상. 외부 패키지 의존성은 없다. 에이전트를 쓰려면 
 | 선택지 | CLI | 모델 ID (환경변수로 변경) |
 |---|---|---|
 | Fable | `claude` | `claude-fable-5-1` (`AGENT_MODEL_FABLE`) |
-| Opus | `claude` | `claude-opus-5` (`AGENT_MODEL_OPUS`) |
+| Opus | `claude` | `claude-opus-5-5` (`AGENT_MODEL_OPUS`) |
 | Codex Astra | `codex` | `gpt-6-astra` (`AGENT_MODEL_ASTRA`) |
 | Sol | `codex` | `gpt-5.6-sol` (`AGENT_MODEL_SOL`) |
 

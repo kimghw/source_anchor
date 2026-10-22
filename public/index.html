@@ -7,6 +7,7 @@
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='none' stroke='%231d5fd1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M12 8v13M12 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM5 13H3a9 9 0 0 0 18 0h-2M9 12h6'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="apple.css">
+  <link rel="stylesheet" href="explorer.css">
   <link rel="stylesheet" href="ask.css">
   <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)">
@@ -19,7 +20,7 @@
     </div>
     <div class="doc-controls" id="doc-controls"></div>
     <div class="book-controls" id="book-controls" hidden></div>
-    <div class="book-controls" id="custom-controls" hidden></div>
+    <div class="book-controls" id="analysis-controls" hidden></div>
     <div class="book-controls" id="form-controls" hidden></div>
     <nav class="summary" id="summary" aria-label="검증 요약"></nav>
     <div class="topbar-actions">
@@ -63,13 +64,13 @@
       <section class="col col-sources" id="book-sources" aria-label="작성 기준·원문"></section>
     </main>
 
-    <!-- 사용자 지정 문서 화면 — 1열 문서, 2열 출처·등록, 3열 보고서 전체 원문 (FR-WB-088, 089) -->
-    <main class="workspace custom-workspace" id="custom-workspace" hidden>
-      <section class="col col-editor" id="custom-editor" aria-label="사용자 지정 문서"></section>
+    <!-- 데이터 분석 화면 — 1열 결과 파일, 2열 분석 에이전트, 3열 작성 기준·원문(읽기 전용) (FR-WB-088, 106) -->
+    <main class="workspace analysis-workspace" id="analysis-workspace" hidden>
+      <section class="col col-editor" id="analysis-results" aria-label="결과 파일"></section>
       <div class="gutter" data-resize="chat"></div>
-      <section class="col col-chat" id="custom-side" aria-label="출처·등록"></section>
+      <section class="col col-chat" id="analysis-chat" aria-label="분석 에이전트"></section>
       <div class="gutter" data-resize="sources"></div>
-      <section class="col col-sources" id="custom-sources" aria-label="원문"></section>
+      <section class="col col-sources" id="analysis-sources" aria-label="작성 기준·원문"></section>
     </main>
 
     <!-- 양식 화면 — 1열 양식(칸·필드 값), 2열 양식 에이전트, 3열 작성 기준·원문(읽기 전용) (FR-WB-090 ~ 092) -->

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createAgent } from './agent.js';
 import { describeAgentConfig, discoverSkills, saveAgentConfig } from './lib/agent_config.js';
+import { PREVIEW_LIMIT } from './lib/analyses.js';
 import { downloadDisposition } from './lib/http_names.js';
 import { markedFile } from './lib/marked_file.js';
 import * as store from './lib/store.js';
@@ -18,11 +19,27 @@ const FORM_BODY_LIMIT = 28 * 1024 * 1024; // 양식 올리기 — 20MiB 파일(d
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.wasm': 'application/wasm' };
 
 const agent = createAgent({ loadState: store.loadState, addSource: store.addSource, bookAgentState: store.bookAgentState, formAgentState: store.formAgentState, bookGuides: store.fullGuides,
-  saveBookChat: store.saveBookChat, getBookChat: store.getBookChat, bookChatContext: store.bookChatContext });
+  saveBookChat: store.saveBookChat, getBookChat: store.getBookChat, bookChatContext: store.bookChatContext,
+  analysisAgentState: store.analysisAgentState, seedAnalysisResults: store.seedAnalysisResults, syncAnalysisResults: store.syncAnalysisResults, saveAnalysisMessages: store.saveAnalysisMessages });
 
 function sendJson(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
+}
+
+// 데이터 분석의 결과 파일 — 에이전트가 쓴 글 파일이다. 내려받기는 원래 이름으로, 보기는 앞 PREVIEW_LIMIT 바이트만 글로 보낸다 (FR-WB-088).
+// 어느 쪽이든 이 서버의 출처로 해석되지 않게 nosniff 와 sandbox 를 건다
+function sendResultFile(res, { data, name }, download) {
+  const body = download ? data : data.subarray(0, PREVIEW_LIMIT);
+  res.writeHead(200, {
+    'Content-Type': download && name.toLowerCase().endsWith('.json') ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8',
+    'Content-Disposition': download ? downloadDisposition(name.replace(/[^\x20-\x7e]|"/g, '_'), name) : 'inline',
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'no-store',
+    'Content-Security-Policy': "sandbox; default-src 'none'",
+    'X-Total-Size': String(data.length),
+  });
+  res.end(body);
 }
 
 // 보관한 원본은 남이 만든 파일이다 — 이 서버의 출처로 스크립트가 돌거나 밖으로 요청이 나가지 않게 연다 (FR-PL-011).
@@ -73,23 +90,29 @@ async function handleApi(req, res, url) {
   if (route === 'POST /api/reports') return sendJson(res, 201, await store.createReport(await readBody(req)));
   if (req.method === 'DELETE' && url.pathname.startsWith('/api/reports/')) return sendJson(res, 200, await store.deleteReport(decodeURIComponent(url.pathname.slice('/api/reports/'.length))));
   // 보고서(메인문서): 보고서 화면 상태 · 새로 만들기 · 삭제 · 목차 저장 (FR-WB-070 ~ 073)
-  if (route === 'GET /api/book') return sendJson(res, 200, await store.loadBookState(url.searchParams.get('report') || undefined));
+  if (route === 'GET /api/book') return sendJson(res, 200, await store.loadBookState(url.searchParams.get('report') || undefined, { remember: url.searchParams.get('remember') !== '0' })); // remember=0: 장 화면에서 엿볼 때 (FR-WB-104)
   if (route === 'PUT /api/book') return sendJson(res, 200, await store.saveToc(await readBody(req)));
   // 보고서 에이전트의 장 추가 수정안 반영 — 목차의 원하는 자리에 빈 장을 만든다 (FR-WB-076)
   if (route === 'POST /api/book/chapters') return sendJson(res, 201, await store.insertChapter(await readBody(req)));
   // 양식 문서에서 고른 제목(헤딩)들을 빈 장으로 — 목차 끝에 순서대로 이어 붙인다 (FR-WB-093)
   if (route === 'POST /api/book/chapters/import') return sendJson(res, 201, await store.importChapters(await readBody(req)));
   if (route === 'POST /api/books') return sendJson(res, 201, await store.createBook(await readBody(req)));
-  // 사용자 지정 문서 — 목록·만들기·읽기·저장·삭제·장의 원문으로 등록 (FR-WB-088, 089)
-  const custom = url.pathname.match(/^\/api\/books\/([^/]+)\/custom(?:\/([^/]+))?(?:\/(register))?$/);
-  if (custom) {
-    const [bookId, id, action] = [decodeURIComponent(custom[1]), custom[2] && decodeURIComponent(custom[2]), custom[3]];
-    if (req.method === 'GET' && !id) return sendJson(res, 200, { custom: await store.customDocList(bookId) });
-    if (req.method === 'POST' && !id) return sendJson(res, 201, await store.createCustomDoc({ ...(await readBody(req)), bookId }));
-    if (req.method === 'POST' && id && action) return sendJson(res, 201, await store.registerCustomDoc({ ...(await readBody(req)), bookId, id }));
-    if (req.method === 'GET' && id && !action) return sendJson(res, 200, { doc: await store.getCustomDoc(bookId, id) });
-    if (req.method === 'PUT' && id && !action) return sendJson(res, 200, await store.saveCustomDoc({ ...(await readBody(req)), bookId, id }));
-    if (req.method === 'DELETE' && id && !action) return sendJson(res, 200, await store.deleteCustomDoc(bookId, id));
+  // 데이터 분석 — 목록·만들기·열기·제목 저장·삭제, 문답 비우기(새 대화), 결과 파일 보기·내려받기(?download=1)·삭제 (FR-WB-088, 106, ERR-WB-010)
+  // 에이전트가 답하는 중인 분석은 지우거나 문답을 비우지 못한다
+  const analysis = url.pathname.match(/^\/api\/books\/([^/]+)\/analyses(?:\/([^/]+)(?:\/(messages|results)(?:\/(.+))?)?)?$/);
+  if (analysis) {
+    const [bookId, id, part] = [decodeURIComponent(analysis[1]), analysis[2] && decodeURIComponent(analysis[2]), analysis[3]];
+    const rel = analysis[4] ? analysis[4].split('/').map(decodeURIComponent).join('/') : null;
+    const busy = () => id && agent.analysisRunning(bookId, id);
+    const refuse = () => sendJson(res, 409, { error: '이 분석의 에이전트가 답하는 중입니다. 중지하거나 끝난 뒤에 다시 하세요.' });
+    if (req.method === 'GET' && !id) return sendJson(res, 200, { analyses: await store.analysisList(bookId) });
+    if (req.method === 'POST' && !id) return sendJson(res, 201, await store.createAnalysis({ ...(await readBody(req)), bookId }));
+    if (req.method === 'GET' && id && !part) return sendJson(res, 200, await store.getAnalysis(bookId, id));
+    if (req.method === 'PUT' && id && !part) return sendJson(res, 200, await store.renameAnalysis({ ...(await readBody(req)), bookId, id }));
+    if (req.method === 'DELETE' && id && !part) return busy() ? refuse() : sendJson(res, 200, await store.deleteAnalysis(bookId, id));
+    if (req.method === 'DELETE' && part === 'messages' && !rel) return busy() ? refuse() : sendJson(res, 200, await store.clearAnalysisMessages(bookId, id));
+    if (req.method === 'GET' && part === 'results' && rel) return sendResultFile(res, await store.readAnalysisResult(bookId, id, rel), url.searchParams.get('download') === '1');
+    if (req.method === 'DELETE' && part === 'results' && rel) return sendJson(res, 200, await store.deleteAnalysisResult(bookId, id, rel));
   }
   // 보고서 화면·장 화면 대화 보관 — 목록 · 다시 열기(screen: 'chapter' 면 장 에이전트로) · 분류 제안 · 분류 저장 · 삭제. 보관은 에이전트가 답을 마칠 때마다 한다 (FR-WB-101, DR-WB-010)
   const chat = url.pathname.match(/^\/api\/books\/([^/]+)\/chats(?:\/([^/]+))?(?:\/(open|suggest))?$/);
@@ -120,7 +143,7 @@ async function handleApi(req, res, url) {
     if (req.method === 'PUT' && id && !file) return sendJson(res, 200, await store.saveForm({ ...(await readBody(req)), bookId, id }));
     if (req.method === 'DELETE' && id && !file) return sendJson(res, 200, await store.deleteForm(bookId, id));
   }
-  // 기준 문서 — 목록은 GET /api/book 에 실려 간다(변환 상태만 다시 받을 때는 GET …/guides). 여기서는 하나의 본문 · 등록(파일은 base64 로 한 요청에 하나) · 종류/제목 고치기 · 삭제 · 보관 파일 열기 (FR-WB-085)
+  // 기준 문서 — 목록은 GET /api/book 에 실려 간다(변환 상태만 다시 받을 때는 GET …/guides). 여기서는 하나의 본문 · 등록(파일은 base64 로 한 요청에 하나) · 종류/제목/설명 고치기 · 삭제 · 보관 파일 열기 (FR-WB-085)
   // PDF 에이전트 변환: POST …/guides/<G>/convert { action: start | rest | stop } (FR-WB-097)
   // 합치기: POST …/guides/<G>/merge { from: <끌어 온 문서> } · 마지막 합치기 되돌리기: POST …/guides/<G>/unmerge (FR-WB-099)
   const guide = url.pathname.match(/^\/api\/books\/([^/]+)\/guides(?:\/([^/]+))?(?:\/(original|markdown|convert|merge|unmerge))?$/);

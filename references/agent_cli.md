@@ -23,6 +23,7 @@
 - MCP: `--mcp-config <파일>`(`{"mcpServers": {"이름": {"command", "args", "env"} | {"type": "http", "url"}}}`) + `--strict-mcp-config`. `-p` 모드에서는 허용 목록에 없는 도구가 거절되므로 `--allowedTools` 에 `mcp__<서버이름>` 을 넣어야 호출된다(서버 단위 허용). `--tools` 는 내장 도구만 제한하고 MCP 도구에는 영향이 없다 (확인).
 - cwd 의 상위 폴더에 `CLAUDE.md` 가 있으면 읽힐 수 있으므로, 에이전트 작업 폴더는 저장소 밖에 둔다.
 - 한 번 답하고 끝나는 호출은 `--no-session-persistence` 를 붙이면 세션 파일을 남기지 않는다(`-p` 와 함께 동작 확인).
+- 파일 쓰기를 한 폴더로 제한하기(2026-10-22, CLI 2.1.286 확인): `--tools "Read,…,Write,Edit" --allowedTools "Read,…,Edit(./results/**)"` — 경로 규칙은 **`Edit(...)` 하나가 Write·Edit 모두에 걸린다**. `Write(./results/**)` 처럼 쓰면 CLI 가 "is not matched by file permission checks — only Edit(path) rules are" 라고 경고하고 규칙으로 쓰지 않는다. `-p` 모드에서 규칙 밖의 쓰기(작업 폴더의 다른 파일, 작업 폴더 밖 절대 경로)는 승인을 기다리지 않고 거절된다(모델에게 "needs permission that hasn't been granted").
 - 서브에이전트: CLI 자체 기능으로는 `--agents <json>` + Task 도구가 있지만 Claude 계열 모델만 부를 수 있다. 다른 제공자의 모델까지 서브에이전트로 쓰려면 아래 "CLI 가 CLI 를 부르기"처럼 MCP 도구로 감싼다.
 
 ## Read 도구로 PDF 읽기 (2026-10-22, CLI 2.1.286 · claude-opus-5-5 로 확인)
@@ -53,5 +54,7 @@
 - **Windows 인코딩**: read-only 샌드박스에서 파일을 PowerShell `Get-Content` 로 읽는데, BOM 없는 UTF-8 한글이 깨져 보인다(콘솔 코드페이지로 해석). 파일에 UTF-8 BOM 을 붙이거나, 내용을 stdin 프롬프트에 직접 넣으면 깨지지 않는다.
 - MCP: `-c mcp_servers.<이름>.command="…"`, `-c mcp_servers.<이름>.args=[…]`, `-c mcp_servers.<이름>.env={…}`, HTTP 는 `-c mcp_servers.<이름>.url="…"`. **`codex exec` 에서는 MCP 도구 호출이 승인 대기 없이 거절된다**("실행 승인이 허용되지 않은 환경"). `-c mcp_servers.<이름>.default_tools_approval_mode="approve"` 를 주면 호출된다 (확인). 이벤트는 `item.started/completed` 의 `mcp_tool_call`(server, tool, arguments, result) — `arguments` 는 `item.started` 에 이미 들어 있다 (확인. 객체인지 JSON 문자열인지는 가리지 않고 둘 다 받게 해 두었다).
 - 웹 검색: `codex --search exec …` — **`--search` 는 최상위 옵션이라 `exec` 앞에 와야 한다**(`codex exec --search` 는 인자 오류). read-only 샌드박스에서도 동작한다(검색은 모델 제공자 쪽 도구라 샌드박스의 네트워크 차단과 무관). 이벤트는 `item.started`/`item.completed` 의 `web_search` 이고, 검색어(`item.query`)는 `item.completed` 에만 들어 있다(`item.started` 에는 `action: {type: "other"}` 뿐) (확인).
-- 파일 수정 작업은 `--sandbox workspace-write -C <dir>`, 참고 이미지는 `-i <file>`, 마지막 답변 저장은 `-o <file>`.
+- 파일 수정 작업은 `--sandbox workspace-write -C <dir>`(`resume` 에서는 `-c sandbox_mode="workspace-write"`), 참고 이미지는 `-i <file>`, 마지막 답변 저장은 `-o <file>`.
+- **workspace-write 의 쓰기 범위**(2026-10-22, Windows · codex-cli 0.160.0 확인): 작업 폴더(cwd)뿐 아니라 TEMP(`%TEMP%`)에도 쓸 수 있다 — cwd 가 TEMP 아래면 그 상위·이웃 폴더에 쓴 파일도 생겼다. `-c sandbox_workspace_write.exclude_tmpdir_env_var=true -c sandbox_workspace_write.exclude_slash_tmp=true` 를 함께 주면 cwd 밖(TEMP 의 상위 폴더, 다른 드라이브의 폴더)은 "access denied" 로 막히고 cwd 안에는 쓴다. cwd 안의 하위 폴더 하나로만 좁히는 설정은 없다.
+- 파일 쓰기 이벤트: `item.started`/`item.completed` 의 `item.type: "file_change"`, `item.changes: [{ path(절대 경로), kind: "add" | … }]` (확인).
 - 계획 검토(협의)용 헤드리스 호출: `codex exec --skip-git-repo-check --sandbox read-only -C <저장소> -c 'model_reasoning_effort="high"' -c 'notify=[]' --color never -o <답 파일> - < <계획 파일>` — stdin(`-`)으로 긴 한국어 프롬프트를 넘기고 `-o` 로 마지막 답만 받는다. read-only 샌드박스에서도 저장소 파일을 읽어 사실을 확인한다(2026-09-26: 1만 자 계획 검토에 약 5분, 이벤트 로그 370KB — `--json` 없이도 stdout 에 진행 로그가 많아 파일로 돌린다). `-C` 에 `E:/dev/...` 슬래시 경로가 된다. 답의 형식(`## 판정` 같은 제목)을 프롬프트에 지정하면 그대로 지킨다.

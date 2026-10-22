@@ -1,0 +1,72 @@
+/* 탐색기: 보고서 제목, 읽기 쉬운 목차, 간결한 파일 목록. 다른 작업 열에는 적용하지 않는다. */
+.col-explorer { background: var(--panel-2); }
+.col-explorer:not(.is-collapsed) > .col-head { min-height: 50px; padding: 10px 14px; border-bottom: 0; }
+.col-explorer:not(.is-collapsed) > .col-head .col-title { font-size: 14px; color: var(--ink-2); }
+.col-explorer:not(.is-collapsed) > .col-head .col-index { display: none; }
+.col-explorer .collapse-btn { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; }
+.col-explorer .tree-tabs { margin: 0 8px 12px; padding: 3px; gap: 3px; border: 1px solid var(--line); background: var(--hover); }
+.col-explorer .tree-tabs button { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; min-height: 34px; padding: 5px 7px; font-size: 13px; border-radius: 7px; }
+.col-explorer .tree-tabs button.is-on { color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgb(0 0 0 / 8%); }
+.col-explorer .tree-tab-count { min-width: 19px; padding: 0 5px; border-radius: 5px; color: var(--muted); background: var(--panel-2); font-size: 11px; font-variant-numeric: tabular-nums; }
+.col-explorer .is-on .tree-tab-count { color: var(--accent-ink); background: var(--accent-soft); }
+.col-explorer .tree { padding: 0 6px 20px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.col-explorer .tree-root { display: block; padding: 6px 4px 10px; margin: 0 0 10px; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.col-explorer .tree-root:is(:hover, :active, .is-current) { background: transparent; box-shadow: none; }
+.col-explorer .tree-root:hover { color: var(--accent-ink); }
+.col-explorer .tree-root .tree-title { flex: auto; width: 100%; font-size: 17px; line-height: 1.5; font-weight: 650; letter-spacing: -0.025em; }
+.col-explorer .tree-section-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px; margin: 0 2px 6px; }
+.col-explorer .tree-section-label { padding: 3px 2px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.col-explorer .tree-tools { flex-wrap: wrap; gap: 1px; margin: 0 0 0 auto; }
+.col-explorer .tree-tools .btn.small { min-height: 28px; padding: 3px 6px; border: 0; background: none; box-shadow: none; color: var(--ink-2); font-size: 11px; }
+.col-explorer .tree-tools .btn:hover:not(:disabled) { color: var(--accent-ink); background: var(--accent-soft); }
+.col-explorer .tree-tools .btn:disabled { opacity: 0.4; }
+.col-explorer .tree-row { margin-block: 2px; border-radius: 8px; }
+.col-explorer .tree-row.lvl-2 { margin-left: 12px; }
+.col-explorer .tree-row.lvl-3 { margin-left: 24px; }
+.col-explorer .tree-row:hover { background: var(--hover); }
+.col-explorer .tree-row.is-current { background: var(--accent-soft); box-shadow: inset 2px 0 var(--accent); }
+.col-explorer .tree-node { gap: 6px 8px; padding: 7px 6px 7px 0; font-size: 16px; line-height: 1.55; }
+.col-explorer .tree-title { white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
+.col-explorer .tree-node .tree-title { font-weight: 500; }
+.col-explorer .tree-row.is-current .tree-title { font-weight: 650; }
+.col-explorer .tree-no { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; min-height: 24px; padding: 0 3px; border-radius: 5px; background: var(--hover); color: var(--ink-2); font-size: 12px; font-weight: 600; line-height: 1.6; }
+.col-explorer .tree-row.is-current .tree-no { color: var(--accent-ink); background: var(--panel); }
+/* 번호 자체가 펼침 단추다. 제목과 형제 요소로 두어 버튼을 중첩하지 않는다. */
+.col-explorer .chapter-row { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 8px; padding-inline: 4px; }
+.col-explorer .chapter-row > .tree-no { min-width: 28px; min-height: 28px; margin-top: 6px; border: 0; }
+.col-explorer .chapter-row > .tree-node { display: block; }
+.col-explorer .tree-toggle { cursor: pointer; }
+.col-explorer .tree-toggle:hover, .col-explorer .tree-toggle[aria-expanded="true"], .col-explorer .has-current > .tree-toggle { background: var(--accent-soft); color: var(--accent-ink); }
+.col-explorer .tree-sub-node { margin-left: 18px; }
+.col-explorer .tree-sub-node .tree-title { font-size: 16px; font-weight: 400; }
+.col-explorer .tree-sub-node .tree-no { background: none; color: var(--muted); font-weight: 400; }
+.col-explorer .tree-actions { top: 6px; right: 3px; gap: 2px; flex-wrap: wrap; max-width: calc(100% - 6px); padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: 0 3px 12px rgb(0 0 0 / 10%); z-index: 2; }
+.col-explorer .tree-actions .icon-btn { min-width: 25px; min-height: 26px; border-radius: 5px; }
+/* 좁은 하위 장에서도 조작 묶음이 번호를 덮지 않도록 제목 열 안에만 둔다. */
+.col-explorer .chapter-row > .tree-actions { grid-column: 2; grid-row: 1; left: 0; right: 0; width: max-content; max-width: 100%; margin-left: auto; }
+.col-explorer .chapter-row:has(> .tree-toggle:focus):not(:hover) > .tree-actions { opacity: 0; pointer-events: none; }
+.col-explorer .tree-add { margin: 12px 0 0; padding: 0; }
+.col-explorer .tree-add .btn { min-height: 34px; border: 1px dashed var(--line-2); border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 13px; box-shadow: none; }
+.col-explorer .tree-add .btn:hover { border-style: solid; border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+.col-explorer .tree-forms { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line); }
+.col-explorer .tree-group { align-items: center; gap: 6px; min-height: 34px; margin: 0 0 5px; padding: 4px 2px; color: var(--ink-2); font-size: 13px; font-weight: 600; }
+.col-explorer .tree-group-fold { width: 16px; text-align: center; }
+.col-explorer .tree-group .count { min-width: 20px; padding: 0 5px; border-radius: 5px; background: var(--hover); font-size: 11px; text-align: center; }
+.col-explorer .form-row, .col-explorer .analysis-row { margin: 4px 0; border: 1px solid transparent; }
+.col-explorer .form-row.is-current, .col-explorer .analysis-row.is-current { border-color: var(--attach-line); box-shadow: none; }
+.col-explorer .tree-file { grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 10px; padding: 10px 8px; }
+.col-explorer .tree-file-copy { display: flex; flex-direction: column; min-width: 0; gap: 7px; }
+.col-explorer .tree-file-icon { position: relative; display: block; width: 22px; height: 27px; margin-top: 2px; border: 1.5px solid var(--line-2); border-radius: 4px; background: var(--panel); color: var(--muted); }
+.col-explorer .tree-file-icon::after { content: ''; position: absolute; inset: 8px 4px; border-block: 1.5px solid currentColor; }
+.col-explorer .is-current .tree-file-icon { color: var(--accent); border-color: var(--accent); }
+.col-explorer .tree-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 8px; white-space: normal; font-size: 12px; line-height: 1.5; opacity: 1; }
+.col-explorer .tree-format { padding: 1px 5px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font-size: 10px; font-weight: 600; letter-spacing: 0.04em; }
+.col-explorer .tree-changed { color: var(--muted); }
+.col-explorer .tree-hint { margin: 0 4px 14px; font-size: 12px; }
+.col-explorer button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media (hover: none) {
+  .col-explorer .tree-actions { position: static; flex: 0 0 100%; justify-content: flex-end; border: 0; background: transparent; box-shadow: none; opacity: 1; pointer-events: auto; }
+  .col-explorer .tree-actions .icon-btn { min-width: 32px; min-height: 32px; }
+  .col-explorer .chapter-row > .tree-actions { grid-column: 1 / -1; grid-row: auto; width: auto; margin-left: 0; }
+  .col-explorer .chapter-row:has(> .tree-toggle:focus) > .tree-actions { opacity: 1; pointer-events: auto; }
+}

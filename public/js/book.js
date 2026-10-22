@@ -16,7 +16,7 @@ import { fill, flash, formatDate, h, moveWindow, placeWindow, toast } from './ut
 
 const $ = id => document.getElementById(id);
 
-let view = { book: { id: null, title: '', instructions: '' }, chapters: [], sources: [], guides: [], custom: [], books: [] };
+let view = { book: { id: null, title: '', instructions: '' }, chapters: [], sources: [], guides: [], analyses: [], books: [] };
 let openSource = null; // 3열에서 열람 중인 원문 (장 ID + 원문 번호로 가린다 — 장이 다르면 같은 번호가 있다)
 let openGuide = null; // 3열에서 열람 중인 기준 문서 ID (FR-WB-085)
 let agentBusy = false; // 2열 에이전트가 답하는 중 — 추출 요청 버튼을 잠근다 (FR-WB-086)
@@ -73,11 +73,11 @@ export function showBookScreen(on) {
   $('book-workspace').hidden = !on;
   $('doc-controls').hidden = on;
   $('book-controls').hidden = !on;
-  $('custom-workspace').hidden = true; // 사용자 지정 문서 화면(custom_docs.js)은 두 화면 어느 쪽으로 가든 닫힌다 (FR-WB-088)
-  $('custom-controls').hidden = true;
+  $('analysis-workspace').hidden = true; // 데이터 분석 화면(analysis.js)은 두 화면 어느 쪽으로 가든 닫힌다 — 답하던 분석 에이전트는 이어 간다 (FR-WB-088, 106)
+  $('analysis-controls').hidden = true;
   $('form-workspace').hidden = true; // 양식 화면(forms.js)도 같다 (FR-WB-090)
   $('form-controls').hidden = true;
-  document.body.classList.remove('on-custom', 'on-form');
+  document.body.classList.remove('on-analysis', 'on-form');
   for (const id of ['summary', 'save-state', 'btn-undo', 'btn-redo', 'btn-export']) $(id).hidden = on;
   document.body.classList.toggle('on-book', on);
   if (!on) closePopups(); // 떠 있는 원문 창은 보고서 화면의 것이다 — 장의 작성 화면에는 다른 장의 원문이 보이지 않는다 (DR-WB-002)
@@ -114,7 +114,7 @@ function render() {
   renderChapters();
   setBookView({ book: view.book, chapters: view.chapters }); // 2열 보고서 에이전트(book_chat.js) — 목차가 바뀌면 안내·수정안 카드를 맞춘다 (FR-WB-076)
   renderSources();
-  showExplorer({ book: view.book, chapters: view.chapters, current: null, custom: view.custom, forms: view.forms }); // 0열: 보고서가 열려 있다
+  showExplorer({ book: view.book, chapters: view.chapters, current: null, analyses: view.analyses, forms: view.forms }); // 0열: 보고서가 열려 있다
 }
 
 function renderHead() {

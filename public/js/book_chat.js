@@ -1,7 +1,7 @@
 // 보고서 화면 2열 — 보고서 에이전트. 주제로 초기 목차를 제안하고, 장 사이에 다르게 쓴 용어·표기와 겹치는 내용·자료를 찾아 편별을 제안한다.
 // 본문은 쓰지 않는다 — 본문은 장의 작성 화면에서 그 장의 에이전트와 쓴다 (FR-WB-076, 077).
 // 목차·지시문은 직접 바꾸지 않고 목차 수정안(장 추가·제목·지시문·순서·삭제) 한 건씩으로 내며, 작성자가 건마다 반영·거부하거나 추가의견을 보낸다.
-// 반영 의견·거부 사유·추가의견은 작성요령 「수정안 검토 의견」에 한 줄씩 남겨 에이전트가 참조한다 (FR-WB-103 — 칸과 기록은 toc_review.js).
+// 반영 의견·거부 사유·추가의견은 작성요령 「수정안 검토 의견」에 한 줄씩 남겨 에이전트가 참조한다 — 의견 칸은 늘 보이고 단추 한 번에 결정한다 (FR-WB-103 — 칸과 기록은 toc_review.js).
 // 대상 장이 이미 없어진 수정안은 반영하지 않고 그렇게 표시한다 (ERR-WB-007).
 // 대화는 답이 끝날 때마다 서버가 보관하고, 「새 대화」로 닫을 때 장·주제로 분류하며 「지난 대화」에서 다시 열어 이어 간다 (FR-WB-101 — book_chat_history.js).
 // 채팅 부품(스트림·Markdown·사용량 표시)은 chat.js 의 것을 함께 쓴다. book.js 가 이 모듈을 부르므로 book.js 를 import 하지 않는다 — 화면 조작은 handlers 로 받는다.
@@ -13,7 +13,7 @@ import { describeUsage, modelOptions, renderMarkdown, streamChat, TOOL_LABELS } 
 import { api } from './state.js';
 import { noteCard } from './note_cards.js';
 import { diffText } from './suggest.js';
-import { recordReview, reviewPanel, reviewResult, reviewWhat, reviewWhatAll } from './toc_review.js';
+import { recordReview, reviewBox, reviewResult, reviewWhat, reviewWhatAll } from './toc_review.js';
 import { fill, h, toast } from './util.js';
 
 let log, form, input, sendBtn, modelSelect, ctxMeter, history, historyBtn;
@@ -26,7 +26,7 @@ let abort = null;
 let lastModel = null;
 let models = [];
 let usageByModel = {}; // 이 대화에서 응답한 모델별 컨텍스트 사용량 (FR-WB-058)
-let batches = []; // 목차 수정안 묶음 [{ id, model, review?, reviewed?, items: [{ …, decision: 'pending' | 'accepted' | 'rejected' | 'gone' | 'stale' | 'commented', review?, reviewed? }] }] — review·reviewed 는 toc_review.js
+let batches = []; // 목차 수정안 묶음 [{ id, model, busy?, reviewed?, items: [{ …, decision: 'pending' | 'accepted' | 'rejected' | 'gone' | 'stale' | 'commented', busy?, reviewed? }] }] — reviewed 는 toc_review.js
 
 const SUGGESTIONS = [
   { label: '용어와 표기를 일관되게', text: '장 사이에 같은 대상을 다르게 쓴 용어·표기·단위를 찾아 어느 장이 어떻게 썼는지 알려 줘' },
@@ -302,13 +302,6 @@ function onLogClick(event) {
     if (rest.startsWith('T-')) return go.openChapter(chapterId, rest);
     return go.showSource(chapterId, rest.split('.')[0], rest.includes('.') ? rest : null);
   }
-  // 반영·거부·추가의견은 먼저 의견 칸을 연다 — 결정은 칸에서 한다 (FR-WB-103)
-  const all = event.target.closest('[data-decide-all]');
-  if (all) return openReview(batchOf(all), all.dataset.decideAll);
-  const button = event.target.closest('[data-decide]');
-  if (!button) return;
-  const batch = batchOf(button);
-  openReview(batch?.items.find(i => i.id === button.closest('[data-item]')?.dataset.item), button.dataset.decide);
 }
 
 // 선택 질문 창(ask.js — app.js 가 이어 준다)이 이 채팅에서 띄울 때 쓰는 부품: 보고서, 고른 모델, 장 표시가 붙은 ID 링크와 그 클릭 (FR-WB-102)
@@ -344,11 +337,16 @@ function renderTocCards() {
     const pending = batch.items.filter(i => i.decision === 'pending');
     fill(card,
       h('div.proposal-head',
-        h('span', h('span.kind-chip', { title: '보고서 내용(장 구성·다룰 내용·범위·순서)에 관한 수정안 — 쓰는 규칙은 작성요령 저장 카드로 옵니다' }, '내용'), `${batch.model} 목차 수정안 ${batch.items.length}건`, pending.length < batch.items.length && h('span.muted', ` · 남은 검토 ${pending.length}건`)),
-        pending.length > 1 && h('span.proposal-head-actions',
-          h('button.btn.small', { type: 'button', dataset: { decideAll: 'accept' } }, '모두 반영'),
-          h('button.btn.small.ghost', { type: 'button', dataset: { decideAll: 'reject' } }, '모두 거부'))),
-      batch.review && pending.length > 1 && reviewPanel(batch, { submit: comment => decideAll(batch, batch.review === 'accept', comment), cancel: () => openReview(batch, null) }),
+        h('span', h('span.kind-chip', { title: '보고서 내용(장 구성·다룰 내용·범위·순서)에 관한 수정안 — 쓰는 규칙은 작성요령 저장 카드로 옵니다' }, '내용'), `${batch.model} 목차 수정안 ${batch.items.length}건`, pending.length < batch.items.length && h('span.muted', ` · 남은 검토 ${pending.length}건`))),
+      pending.length > 1 && reviewBox(batch, {
+        label: '남은 수정안 모두에 대한 의견',
+        placeholder: `남은 ${pending.length}건 모두에 대한 의견 (선택)`,
+        title: '적고 「모두 반영」·「모두 거부」를 누르면 작성요령 「수정안 검토 의견」에 한 줄로 남습니다. 비우면 결정만 합니다',
+        actions: [
+          { text: '모두 반영', primary: true, blocked: batch.busy ? '반영하는 중입니다' : '', run: comment => decideAll(batch, true, comment) },
+          { text: '모두 거부', blocked: batch.busy ? '반영하는 중입니다' : '', run: comment => decideAll(batch, false, comment) },
+        ],
+      }),
       reviewResult(batch),
       batch.items.map(item => tocItem(batch, item)),
       pending.length > 0 && h('div.proposal-foot', '반영하기 전에는 목차와 지시문이 바뀌지 않습니다. 반영한 장 추가·삭제는 실행 취소할 수 없습니다.'));
@@ -369,15 +367,16 @@ function tocItem(batch, item) {
     body,
     item.reason && h('div.change-reason', item.reason),
     item.decision !== 'pending' ? [h('div.change-decision', { class: ['gone', 'stale'].includes(item.decision) ? `is-${item.decision}` : '' }, DECISION[item.decision]), reviewResult(item)]
-      : item.review ? reviewPanel(item, {
-        submit: comment => (item.review === 'comment' ? sendComment(item, comment) : decide(batch, item, item.review === 'accept', comment)),
-        cancel: () => openReview(item, null),
-        blocked: item.busy ? '반영하는 중입니다' : item.review === 'accept' && stale ? '지시문이 수정안을 낸 뒤 달라져 반영할 수 없습니다' : item.review === 'comment' && running ? '에이전트가 답하는 중에는 추가의견을 보낼 수 없습니다' : '',
-      })
-      : h('div.change-actions',
-        h('button.btn.small', { type: 'button', dataset: { decide: 'accept' }, disabled: stale }, '✓ 반영'),
-        h('button.btn.small.ghost', { type: 'button', dataset: { decide: 'reject' } }, '✕ 거부'),
-        h('button.btn.small.ghost', { type: 'button', dataset: { decide: 'comment' }, title: '반영·거부하지 않고 이 수정안에 대한 의견을 에이전트에게 보내 고친 수정안을 받습니다' }, '💬 추가의견')));
+      : reviewBox(item, {
+        label: '이 수정안에 대한 의견',
+        placeholder: '의견 (선택) — 비우면 결정만 합니다',
+        title: '적고 반영·거부하면 작성요령 「수정안 검토 의견」에 남아 에이전트가 참조합니다. 추가의견은 여기 적어야 보낼 수 있습니다',
+        actions: [
+          { text: '✓ 반영', primary: true, blocked: item.busy || batch.busy ? '반영하는 중입니다' : stale ? '지시문이 수정안을 낸 뒤 달라져 반영할 수 없습니다' : '', run: comment => decide(batch, item, true, comment) },
+          { text: '✕ 거부', blocked: item.busy || batch.busy ? '반영하는 중입니다' : '', run: comment => decide(batch, item, false, comment) },
+          { text: '💬 추가의견', needsText: true, title: '반영·거부하지 않고 칸에 적은 의견을 에이전트에게 보내 고친 수정안을 받습니다', blocked: item.busy || batch.busy ? '반영하는 중입니다' : running ? '에이전트가 답하는 중에는 추가의견을 보낼 수 없습니다' : '', run: comment => sendComment(item, comment) },
+        ],
+      }));
 }
 
 // 지시문 변경 — 절마다 나눠 바뀐 절만 diff 로 보여 주고, 너무 긴 절은 diff 대신 전후 전문으로 보여 준다(diffText 는 글자 수의 곱만큼 일한다) (FR-WB-073, 076)
@@ -403,34 +402,27 @@ function instructionsDiff(before, after) {
 
 const CANCELLED = Symbol('cancelled');
 
-// 의견 칸을 연다(kind: 'accept' | 'reject' | 'comment') · 닫는다(null)
-function openReview(target, kind) {
-  if (!target) return;
-  target.review = kind;
-  renderTocCards();
-}
-
-// comment: 칸에 적은 반영 의견·거부 사유 — 반영하지 못하면(실패·취소·ERR-WB-007·009) 남기지 않는다 (FR-WB-103 (a))
+// comment: 칸에 적은 반영 의견·거부 사유(비었으면 결정만) — 반영하지 못하면(실패·취소·ERR-WB-007·009) 남기지 않는다 (FR-WB-103 (a))
 async function decide(batch, item, accept, comment = '') {
   if (item.decision !== 'pending' || item.busy) return;
   if (!accept) {
-    Object.assign(item, { decision: 'rejected', review: null });
+    item.decision = 'rejected';
     renderTocCards();
     return keepReview(item, 'reject', comment);
   }
   if (targetGone(item)) {
-    Object.assign(item, { decision: 'gone', review: null });
+    item.decision = 'gone';
     return renderTocCards();
   }
   if (isStale(item)) { // 그 사이 작성자가 지시문을 고쳤다 — 옛 전문으로 덮어쓰지 않는다 (ERR-WB-009)
-    Object.assign(item, { decision: 'stale', review: null });
+    item.decision = 'stale';
     return renderTocCards();
   }
   item.busy = true;
   try {
     const data = await apply(item);
     if (data === CANCELLED) return;
-    Object.assign(item, { decision: 'accepted', review: null });
+    item.decision = 'accepted';
     if (data) go.bookChanged(data); // 보고서 상태를 다시 그린다 — 그때 setBookView 가 카드도 다시 그린다
     else await go.reload();
   } catch (err) {
@@ -444,13 +436,18 @@ async function decide(batch, item, accept, comment = '') {
 
 // 「모두 반영」·「모두 거부」 — 의견은 그렇게 결정된 수정안 전체에 대한 한 줄로 남긴다
 async function decideAll(batch, accept, comment = '') {
-  if (!batch) return;
-  batch.review = null;
+  if (!batch || batch.busy) return;
+  batch.busy = true;
+  renderTocCards();
   const decided = [];
-  for (const item of batch.items) {
-    if (item.decision !== 'pending') continue;
-    await decide(batch, item, accept);
-    if (item.decision === (accept ? 'accepted' : 'rejected')) decided.push(item);
+  try {
+    for (const item of batch.items) {
+      if (item.decision !== 'pending') continue;
+      await decide(batch, item, accept);
+      if (item.decision === (accept ? 'accepted' : 'rejected')) decided.push(item);
+    }
+  } finally {
+    batch.busy = false;
   }
   renderTocCards();
   if (decided.length) await keepReview(batch, accept ? 'accept' : 'reject', comment, reviewWhatAll(decided, item => TOC_OP[item.op]));
@@ -460,7 +457,7 @@ async function decideAll(batch, accept, comment = '') {
 function sendComment(item, comment) {
   if (running || !comment) return;
   const what = reviewWhat(item, TOC_OP[item.op]);
-  Object.assign(item, { decision: 'commented', review: null });
+  item.decision = 'commented';
   const draft = input.value; // 입력창에 쓰던 글은 그대로 둔다
   send(`목차 수정안 [${what}]에 대한 추가의견: ${comment}`);
   input.value = draft;

@@ -1,28 +1,35 @@
 // 3열 원문 — 열어 둔 문서에 수집한 자료 목록과 원문 보기. 문장·표 셀 단위로 고르고, 끌거나 버튼으로 다른 열에 넘긴다.
+// 머리줄 아래 탭으로 「이 장 원문」과 「보고서 전체」(기준 문서 + 모든 장 원문, 읽기 전용 — sources_report.js)를 오간다 (FR-WB-104).
 import { anchorText, blockLoc, SOURCE_TYPES } from '../shared/model.js';
 import { collapseButton } from './columns.js';
 import { startDrag } from './dnd.js';
 import { previewUrl } from './md_preview.js';
 import { revealSentences } from './editor.js';
 import { noteDialog, readerPane } from './source_view.js';
+import { drawReport, refreshReport, reportCount } from './sources_report.js';
 import { api, attach, citedAnchors, flushSave, inSourceOrder, insertAnchors, linkAnchors, on, primarySentence, selectAnchor, selectDoc, setSources, state } from './state.js';
 import { alignedNumber, fill, flash, formatDate, fractionWidth, h, toast } from './util.js';
 
-let root, body, selbar, headCount;
+let root, body, report, scopeTabs, selbar, headCount;
 let reader = null; // 열어 둔 원문의 열람 부품 (source_view.js) — 보기 방식 전환·참조 띠 다시 읽기
+let scope = 'chapter'; // 3열 탭 — 'chapter'(이 장 원문) · 'report'(보고서 전체). 다른 장을 열어도 유지한다 (FR-WB-104)
 
 const anchorNode = id => body.querySelector(`[data-aid="${id}"]`);
 
 export function initSources(container) {
   root = container;
   headCount = h('span.count');
+  scopeTabs = h('nav.src-scope', { 'aria-label': '원문 범위' });
   body = h('div.src-scroll');
+  report = h('div.src-report', { hidden: true });
   selbar = h('div.selbar', { hidden: true });
   root.append(
     h('header.col-head',
       h('div.col-title', h('span.col-index', '3'), '원문', headCount),
       h('div.col-head-actions', h('button.btn.small', { type: 'button', onclick: openAddDialog }, '＋ 원문 추가'), collapseButton(root, '3열 원문'))),
+    scopeTabs,
     body,
+    report,
     selbar,
   );
 
@@ -45,8 +52,9 @@ export function initSources(container) {
 export function openAnchor(anchorId) {
   const anchor = state.anchors.get(anchorId);
   if (!anchor) return toast('원문에서 이 위치를 찾지 못했습니다.', 'error');
-  if (state.activeSourceId !== anchor.source.id) {
+  if (state.activeSourceId !== anchor.source.id || scope !== 'chapter') {
     state.activeSourceId = anchor.source.id;
+    scope = 'chapter'; // 근거 위치는 이 장 원문에 있다 (FR-WB-104)
     render();
   }
   reader?.setMode('body'); // 원본·Markdown 을 보고 있었으면 본문으로 돌아와 그 자리를 강조한다
@@ -72,7 +80,32 @@ function render() {
   body.classList.toggle('is-reader', Boolean(source)); // 열람 중에는 부품(reader-pane)이 스크롤을 맡는다
   body.replaceChildren(...(source ? renderReader(source) : renderList()));
   body.scrollTop = 0;
+  body.hidden = scope !== 'chapter';
+  report.hidden = scope !== 'report';
+  drawScope();
+  if (scope === 'report') drawReport(report, reportHandlers);
   updateMarks();
+}
+
+// 「보고서 전체」 탭이 쓰는 조작 — 이 장의 원문은 「이 장 원문」 탭에서 연다. 다시 그리기는 탭과 그 몸통만(이 장 원문 목록은 그대로)
+const reportHandlers = {
+  openOwn: id => { state.activeSourceId = id; scope = 'chapter'; render(); },
+  redraw: () => { if (scope !== 'report') return; drawScope(); drawReport(report, reportHandlers); },
+};
+
+function drawScope() {
+  const tab = (key, label, count, title) => h('button.src-tab', { type: 'button', class: scope === key ? 'is-on' : null, 'aria-pressed': String(scope === key), title, onclick: () => pickScope(key) },
+    label, count && h('span.count', count));
+  fill(scopeTabs,
+    tab('chapter', '이 장 원문', String(state.sources.length), '이 장에 수집한 원문 — 근거로 연결하고 채택 거부·삭제합니다'),
+    tab('report', '보고서 전체', reportCount(), '이 보고서의 기준 문서(작성요령·참고문헌)와 모든 장의 원문 — 다른 장의 원문은 읽기만 합니다'));
+}
+
+function pickScope(key) {
+  if (key === scope) return;
+  scope = key;
+  render();
+  if (key === 'report') refreshReport(reportHandlers); // 고를 때마다 최신 목록을 받는다 (FR-WB-104)
 }
 
 function renderList() {
@@ -228,8 +261,8 @@ function updateMarks() {
 
 function renderSelbar(cited) {
   const ids = inSourceOrder(state.sel.anchors);
-  selbar.hidden = !ids.length;
-  if (!ids.length) return;
+  selbar.hidden = !ids.length || scope !== 'chapter'; // 「보고서 전체」에서는 이 장 원문의 선택 막대를 숨긴다
+  if (selbar.hidden) return;
   const target = primarySentence();
   const citing = [...new Set(ids.flatMap(a => cited.get(a) || []))];
   fill(selbar,
@@ -340,6 +373,7 @@ function openAddDialog() {
         try {
           const source = await api('POST', '/api/sources', { docId: state.doc.id, title: title.value, type: type.value, publisher: publisher.value, publishedAt: publishedAt.value, url: url.value, markdown: markdown.value });
           state.activeSourceId = source.id;
+          scope = 'chapter'; // 새 원문은 「이 장 원문」 탭에서 연다 (FR-WB-104)
           setSources([...state.sources, source]);
           dialog.close();
         } catch (err) {

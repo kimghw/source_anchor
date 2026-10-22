@@ -144,7 +144,7 @@ input, textarea { caret-color: var(--accent); }
 .tree-tabs { padding: 4px; margin: 2px 10px 8px; border: 0; border-radius: 9px; background: var(--hover); gap: 2px; }
 .tree-tabs button { min-height: 30px; padding: 5px; font-size: 11px; font-weight: 500; }
 .tree-tabs button.is-on { border-color: transparent; background: var(--panel); color: var(--ink); box-shadow: 0 1px 4px rgb(0 0 0 / 8%); }
-.tree { padding: 8px 10px 20px; }
+.tree { padding: 8px 6px 20px; }
 .tree-root { padding: 12px 10px; border-color: transparent; background: transparent; font-size: 16px; line-height: 1.5; gap: 6px; }
 .tree-root .tree-title, .tree-node .tree-title { white-space: normal; overflow-wrap: anywhere; }
 .tree-root.is-current { border-color: transparent; background: var(--panel); box-shadow: var(--surface-shadow); }
@@ -152,7 +152,8 @@ input, textarea { caret-color: var(--accent); }
 .tree-row { margin-block: 1px; }
 .tree-row.is-current { box-shadow: none; background: var(--accent-soft); }
 .tree-row.has-current .tree-title, .tree-row.has-current .tree-fold { color: var(--accent-ink); }
-.tree-node { padding-block: 5px; font-size: 16px; line-height: 1.5; }
+/* 수준 1 장의 번호가 목록 가장자리에서 24px(여백 6 + 펼침 표시 14 + 4) 안에서 시작한다 (FR-WB-061) */
+.tree-node { padding-block: 5px; padding-inline-start: 4px; font-size: 16px; line-height: 1.5; }
 .tree-node .tree-title { font-weight: 500; }
 .tree-sub-node .tree-title { font-size: inherit; }
 .tree-no { font-size: 10px; font-weight: 500; }
@@ -202,9 +203,6 @@ input, textarea { caret-color: var(--accent); }
 .doc-title { font-size: 26px; font-weight: 650; letter-spacing: -0.04em; }
 .ed-page { padding: 8px 36px 120px; font-size: 15px; line-height: 2; }
 h2.blk-body { font-size: 21px; letter-spacing: -0.03em; }
-.custom-title { background: transparent; border-color: transparent; padding-inline: 0; font-size: 26px; }
-.custom-title:hover { border-color: var(--line); }
-.custom-text { border-color: var(--line); border-radius: 14px; padding: 22px; }
 
 /* A calm assistant, with prompts separated from the conversation. */
 .col-chat > .col-head .col-title { flex: 1 0 auto; } /* never squeeze the title and model picker — narrow columns wrap the actions instead */
@@ -270,7 +268,6 @@ h2.blk-body { font-size: 21px; letter-spacing: -0.03em; }
 .ratio-row { border-radius: 12px; padding: 14px; }
 .ratio-list { gap: 10px; margin-block: 22px; }
 .toast { padding: 12px 20px; border-radius: 12px; font-size: 13px; }
-.custom-register { border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
 
 @media (max-width: 1400px) {
   .topbar { padding: 10px 16px; gap: 8px 14px; }

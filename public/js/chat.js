@@ -305,7 +305,7 @@ function scrollToEnd() {
   log.scrollTop = log.scrollHeight;
 }
 
-export const TOOL_LABELS = { Read: '원문 읽기', Grep: '원문 검색', Glob: '파일 찾기', WebSearch: '웹 검색', WebFetch: '웹 페이지 읽기', Collect: '원문 수집' };
+export const TOOL_LABELS = { Read: '원문 읽기', Grep: '원문 검색', Glob: '파일 찾기', WebSearch: '웹 검색', WebFetch: '웹 페이지 읽기', Collect: '원문 수집', Write: '파일 쓰기', Edit: '파일 고치기' }; // Write·Edit 는 데이터 분석의 results/ 에만 (FR-WB-106)
 
 // ───────────────────────────── 수정안 카드 ─────────────────────────────
 

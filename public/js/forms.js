@@ -1,19 +1,16 @@
 // 양식 화면 — 작성자가 올린 docx·hwpx·hwp 양식의 칸·필드에 값을 채운다 (FR-WB-090 ~ 092).
 // 1열 양식(머리줄 + 문서 순서의 헤딩·필드·표 — 번호 배지·제자리 편집·번호별 지침·자동 저장·내려받기·목차로 가져오기) · 2열 양식 에이전트 · 3열 보고서의 작성 기준·원문(보고서 화면 3열과 같은 구성, 읽기 전용).
-// 0열 탐색기 「장」 탭의 양식 묶음에서 열린다. 보고서·장·사용자 지정 문서 화면 모듈(book.js·documents.js·custom_docs.js)을 import 하지 않는다 — 화면 전환 진입점은 app.js 가 넘긴다.
+// 0열 탐색기 「목차」 탭의 양식 묶음에서 열린다. 보고서·장·데이터 분석 화면 모듈(book.js·documents.js·analysis.js)을 import 하지 않는다 — 화면 전환 진입점은 app.js 가 넘긴다.
 // 양식의 제목(헤딩)을 보고서의 장으로 가져오는 목차 후보 대화상자는 toc_import.js — 올린 직후·1열 머리줄·0열 양식 행(importToc)에서 연다 (FR-WB-093).
 // 제목·필드 줄의 수준·종류 조절(번호 불변)과 구조 규칙 머리줄·대화상자의 부품은 form_structure.js — 노드 갱신·다시 그리기·저장은 여기서 한다 (FR-WB-094, 095).
 // 한글에서 보는 것처럼 그리는 미리보기는 form_preview.js — 1열 머리줄 「구조 / 미리보기」 전환, 지금 값을 기입한 사본을 쪽 단위로(읽기 전용, hwp·hwpx) (FR-WB-096).
-import { SOURCE_TYPES } from '../shared/model.js';
 import { headingCandidates } from '../shared/toc.js';
-import { guideReader, guidesGroup } from './book_guides.js';
 import { collapseButton } from './columns.js';
 import { applyBookData, showExplorer } from './explorer.js';
 import { initFormChat, sendFormMessage, setFormView } from './form_chat.js';
 import { formPreview, previewable } from './form_preview.js';
 import { canSwitchKind, clearStructure, FORM_LEVEL_MAX, noteStructure, paintStructRow, recordStructure, restoreStructure, rulesHeadControls, setRules, structControls, STRUCTURE_REQUEST, structureKey, takeStructure } from './form_structure.js';
-import { readerDoc } from './reader_doc.js';
-import { readerPane } from './source_view.js';
+import { reportSourcesColumn } from './report_sources.js';
 import { api, flushSave, state } from './state.js';
 import { openTocImport } from './toc_import.js';
 import { debounce, fill, flash, h, toast } from './util.js';
@@ -24,10 +21,8 @@ const FILE_LIMIT = 20 * 1024 * 1024; // 서버(lib/forms.js FILE_LIMIT)와 같�
 const FILE_LIMIT_TEXT = `${FILE_LIMIT / 1024 / 1024}MiB`;
 let bookId = null;
 let form = null; // 열어 둔 양식 { id, title, fileName, format, nodes, tables, values, instructions, … }
-let book = null; // 보고서 상태 { book, chapters, sources, guides, custom, forms } — 3열·탐색기
-let openSource = null; // 3열에서 열람 중인 원문 (장 ID/원문 번호)
-let openGuide = null; // 3열에서 열람 중인 기준 문서 ID
-let readerHandle = null; // 3열 열람 화면의 부품 — 에이전트 답의 원문 위치 링크가 본문 보기로 돌려 그 자리를 보여 준다
+let book = null; // 보고서 상태 { book, chapters, sources, guides, analyses, forms } — 3열·탐색기
+let sourcesCol = null; // 3열 작성 기준·원문 (report_sources.js) — 에이전트 답의 원문 위치 링크도 이것으로 연다
 let units = new Map(); // 번호 → { text(원본 글), locked, note, where(지침 상자 머리줄의 자리) } — 칸과 필드가 같은 단위다
 let guideN = null; // 지침 상자에 열어 둔 번호
 let pending = false; // 아직 서버에 보내지 않은 값·지침·제목 변경이 있다
@@ -37,11 +32,11 @@ let previewOn = false; // 1열이 미리보기를 보이고 있다
 
 const formsUrl = (owner, id = '') => `/api/books/${encodeURIComponent(owner)}/forms${id ? `/${encodeURIComponent(id)}` : ''}`;
 const bookUrl = owner => (owner ? `/api/book?report=${encodeURIComponent(owner)}` : '/api/book');
-const sourceKey = s => `${s.chapterId}/${s.id}`;
 
 export function initForms(handlers) {
   Object.assign(go, handlers);
-  saveState = h('span.custom-save-state', { role: 'status' }, '저장됨');
+  saveState = h('span.screen-save-state', { role: 'status' }, '저장됨');
+  sourcesCol = reportSourcesColumn($('form-sources'), { key: 'form', label: '3열 작성 기준·원문', reload: () => reload() });
   fill($('form-controls'),
     h('button.btn.small.ghost.to-book', { type: 'button', title: '보고서 화면으로', onclick: leave }, '↩ 보고서'),
     h('span.doc-kind', '양식'),
@@ -74,7 +69,7 @@ export async function openForm(wantedBookId, id) {
     bookId = state.book.id;
     book = state;
     form = loaded;
-    openSource = openGuide = null;
+    sourcesCol.show(bookId, book, { reset: true });
     history.replaceState(null, '', `?report=${encodeURIComponent(bookId)}&form=${encodeURIComponent(form.id)}`);
     showFormScreen(true);
     render();
@@ -115,7 +110,7 @@ export async function importToc(wantedBookId, formId) {
   }
 }
 
-// 만든 뒤 — 양식 화면이 열려 있으면 받아 둔 보고서 상태를 새 목차로 맞춰 3열·탐색기를 다시 그리고, 다른 화면(보고서·장·사용자 지정 문서)이면 그 화면이 맞춘다(explorer.js applyBookData)
+// 만든 뒤 — 양식 화면이 열려 있으면 받아 둔 보고서 상태를 새 목차로 맞춰 3열·탐색기를 다시 그리고, 다른 화면(보고서·장·데이터 분석)이면 그 화면이 맞춘다(explorer.js applyBookData)
 function openCandidates(data, target) {
   return openTocImport({ bookId: data.book.id, form: target, chapters: data.chapters, onDone: result => {
     if (!$('form-workspace').hidden && book && book.book.id === result.book.id) {
@@ -165,24 +160,24 @@ async function leave() {
   await go.openBook(bookId).catch(err => toast(err.message, 'error'));
 }
 
-// 네 화면은 상단 머리줄을 함께 쓴다 — 장에만 있는 것은 접는다. 다른 화면을 열면 book.js showBookScreen · custom_docs.js showCustomScreen 이 이 화면을 숨긴다
+// 네 화면은 상단 머리줄을 함께 쓴다 — 장에만 있는 것은 접는다. 다른 화면을 열면 book.js showBookScreen · analysis.js showAnalysisScreen 이 이 화면을 숨긴다
 function showFormScreen(on) {
   $('workspace').hidden = true;
   $('book-workspace').hidden = true;
-  $('custom-workspace').hidden = true;
+  $('analysis-workspace').hidden = true;
   $('form-workspace').hidden = !on;
   $('doc-controls').hidden = true;
   $('book-controls').hidden = true;
-  $('custom-controls').hidden = true;
+  $('analysis-controls').hidden = true;
   $('form-controls').hidden = !on;
   for (const id of ['summary', 'save-state', 'btn-undo', 'btn-redo', 'btn-export']) $(id).hidden = true;
-  document.body.classList.remove('on-book', 'on-custom');
+  document.body.classList.remove('on-book', 'on-analysis');
   document.body.classList.toggle('on-form', on);
 }
 
 // ───────────────────────────── 그리기 ─────────────────────────────
 
-const explore = () => showExplorer({ book: book.book, chapters: book.chapters, current: null, custom: book.custom, forms: book.forms, currentForm: form.id });
+const explore = () => showExplorer({ book: book.book, chapters: book.chapters, current: null, analyses: book.analyses, forms: book.forms, currentForm: form.id });
 
 function render() {
   renderHead();
@@ -301,16 +296,7 @@ const cells = { cellText, applyValue, revealCell, markProposal };
 
 // 2열 답·카드의 원문 위치 링크 — 3열에서 그 원문을 열고, 위치가 있으면 본문 보기로 돌려 비춘다
 function showSource(chapterId, sourceId, anchorId) {
-  if (!book.sources.some(s => s.chapterId === chapterId && s.id === sourceId)) return toast('이 보고서에 없는 원문입니다.', 'error');
-  openSource = `${chapterId}/${sourceId}`;
-  openGuide = null;
-  renderSources();
-  if (!anchorId) return;
-  readerHandle?.setMode('body');
-  const node = $('form-sources').querySelector(`[data-aid="${CSS.escape(anchorId)}"]`);
-  if (!node) return toast('이 원문에 없는 위치입니다.', 'error');
-  node.scrollIntoView({ block: 'center' });
-  flash(node, 'is-anchor-flash');
+  sourcesCol.openSource(chapterId, sourceId, anchorId);
 }
 
 // 2열 답의 장·문장 링크 — 양식 저장을 먼저 끝내고(실패하면 옮기지 않는다) 그 장의 작성 화면을 열어 문장을 보여 준다 (ERR-WB-011)
@@ -599,40 +585,7 @@ async function reload() {
   explore();
 }
 
-// 3열 — 작성 기준·원문. 기준 문서 묶음 아래에 장별로 묶은 원문 목록(읽기 전용). 누르면 열 안이 열람 화면으로 바뀐다 (FR-WB-090)
+// 3열 — 작성 기준·원문(report_sources.js, 읽기 전용) (FR-WB-090)
 function renderSources() {
-  const source = book.sources.find(s => sourceKey(s) === openSource);
-  if (!source) openSource = readerHandle = null;
-  const guide = book.guides.find(g => g.id === openGuide);
-  if (!guide) openGuide = null;
-  fill($('form-sources'),
-    h('header.col-head', h('div.col-title', h('span.col-index', '3'), '작성 기준·원문', h('span.count', `${book.guides.length} · ${book.sources.length}`)), h('div.col-head-actions', collapseButton($('form-sources'), '3열 작성 기준·원문'))),
-    guide ? guideReader(bookId, guide, { back: () => { openGuide = null; renderSources(); } })
-      : source ? reader(source) : sourceList());
-}
-
-function sourceList() {
-  const byChapter = new Map(book.chapters.map(ch => [ch.id, []]));
-  for (const s of book.sources) byChapter.get(s.chapterId)?.push(s);
-  const groups = book.chapters.filter(ch => byChapter.get(ch.id).length).map(ch => h('section.book-source-group',
-    h('h3.book-source-chapter', ch.title, h('span.count', String(byChapter.get(ch.id).length))),
-    byChapter.get(ch.id).map(s => h('div.book-source',
-      h('button.book-source-head', { type: 'button', title: `${s.chapterId} · ${s.id} · ${s.title}\n원문 열기`, onclick: () => { openSource = sourceKey(s); openGuide = null; renderSources(); } },
-        h('span.type-badge', { class: `type-${s.type}` }, SOURCE_TYPES[s.type] ?? s.type),
-        h('span.book-source-title', s.title),
-        h('span.book-source-publisher', s.publisher || '발행처 미상'),
-        h('span.book-source-id', `${s.chapterId} · ${s.id}`))))));
-  return h('div.book-source-list',
-    guidesGroup(bookId, book.guides, { open: g => { openGuide = g.id; openSource = null; renderSources(); }, changed: reload, dropHint: false }), // 이 화면에 놓은 파일은 양식으로 올라간다
-    h('h3.book-source-chapter.book-source-part', '장별 원문', h('span.count', String(book.sources.length))),
-    groups.length ? groups : h('div.empty', h('div.empty-icon', { 'aria-hidden': 'true' }, '▤'), h('p', '아직 수집한 원문이 없습니다.'), h('p.muted', '원문은 장의 작성 화면에서 수집합니다.')));
-}
-
-function reader(source) {
-  readerHandle = readerPane(source, { docId: source.chapterId, key: 'form', body: () => readerDoc(source) });
-  return h('div.book-reader',
-    h('nav.src-tabs',
-      h('button.src-tab.back', { type: 'button', onclick: () => { openSource = null; renderSources(); } }, '← 목록'),
-      h('span.book-reader-pos', `${source.chapterId} · ${source.id}`)),
-    readerHandle.pane);
+  sourcesCol.show(bookId, book);
 }

@@ -36,8 +36,6 @@ export function initPanelNav() {
       workspace = next;
       selected = 'main';
     }
-    const chat = buttons.find(button => button.dataset.panel === 'chat');
-    if (chat) chat.textContent = workspace?.id === 'custom-workspace' ? '출처·등록' : '에이전트';
     for (const button of buttons) button.disabled = !panel(button.dataset.panel);
     markSelected(selected);
     if (compact.matches) reveal();
