@@ -887,28 +887,6 @@ td.src-ro-cell.is-cited { box-shadow: inset 0 -1px 0 var(--accent); }
 /* 화면 머리줄의 저장 상태 — 양식·데이터 분석 화면 */
 .screen-save-state { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .screen-save-state.is-error { color: var(--bad); font-weight: 700; }
-/* 데이터 분석 화면 — 1열 결과 파일, 0열 답하는 중 표시 (FR-WB-088, 106) */
-.analysis-row .tree-busy { margin-right: 6px; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
-.analysis-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); overflow-y: auto; }
-.analysis-folder { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-2); font-size: var(--text-sm); }
-.analysis-folder-label { color: var(--ink-2); font-weight: 600; }
-.analysis-folder-path { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
-.result-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-1); }
-.result-row { display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
-.result-row:hover, .result-row:focus-within { border-color: var(--accent); }
-.result-row.is-invalid { border-color: var(--bad); }
-.result-open { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-md); background: none; color: var(--ink); text-align: left; cursor: pointer; }
-.result-path { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
-.result-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.result-ext { padding: 0 6px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font-size: 10.5px; font-weight: 600; }
-.result-invalid { color: var(--bad); font-weight: 700; }
-.result-actions { display: flex; align-items: center; gap: 2px; padding-right: var(--space-1); }
-.result-actions a { text-decoration: none; }
-.result-view-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
-.result-note { margin: 0; font-size: var(--text-sm); }
-.result-note:empty { display: none; }
-.result-preview { flex: 1; min-height: 120px; margin: 0; padding: var(--space-3); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-2); color: var(--ink); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre; tab-size: 2; }
-.ref.result-ref { font-family: var(--mono); }
 /* 양식 — 0열 「목차」 탭의 양식 묶음과 양식 화면 (FR-WB-090) */
 .tree-forms { margin-top: var(--space-5); padding-top: var(--space-3); border-top: 1px solid var(--line); }
 .tree-group { display: flex; align-items: baseline; gap: 6px; width: 100%; margin: 0 0 4px; padding: 4px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); font-size: var(--text-sm); font-weight: 700; text-align: left; cursor: pointer; }
@@ -1073,7 +1051,7 @@ body.is-capturing .capture-btn { visibility: hidden; }
 
 /* 저장된 너비는 --w-*가 우선한다. 기본 너비만 화면에 맞추고 7px 손잡이와 최소 너비는 유지한다. */
 @media (max-width: 1400px) {
-  .chapter-list, .book-source-list, .analysis-body { padding: var(--space-3); }
+  .chapter-list, .book-source-list { padding: var(--space-3); }
   .ed-title { padding-inline: 32px; }
   .ed-page { padding-inline: 32px; }
   .add-sent { right: -28px; }

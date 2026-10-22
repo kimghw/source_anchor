@@ -97,9 +97,9 @@ async function handleApi(req, res, url) {
   // 양식 문서에서 고른 제목(헤딩)들을 빈 장으로 — 목차 끝에 순서대로 이어 붙인다 (FR-WB-093)
   if (route === 'POST /api/book/chapters/import') return sendJson(res, 201, await store.importChapters(await readBody(req)));
   if (route === 'POST /api/books') return sendJson(res, 201, await store.createBook(await readBody(req)));
-  // 데이터 분석 — 목록·만들기·열기·제목 저장·삭제, 문답 비우기(새 대화), 결과 파일 보기·내려받기(?download=1)·삭제 (FR-WB-088, 106, ERR-WB-010)
+  // 데이터 분석 — 목록·만들기·열기·제목 저장·삭제, 문답 비우기(새 대화), 입력 자료 저장, 결과 파일 보기·내려받기(?download=1)·삭제 (FR-WB-088, 106, 107, ERR-WB-010)
   // 에이전트가 답하는 중인 분석은 지우거나 문답을 비우지 못한다
-  const analysis = url.pathname.match(/^\/api\/books\/([^/]+)\/analyses(?:\/([^/]+)(?:\/(messages|results)(?:\/(.+))?)?)?$/);
+  const analysis = url.pathname.match(/^\/api\/books\/([^/]+)\/analyses(?:\/([^/]+)(?:\/(messages|results|inputs)(?:\/(.+))?)?)?$/);
   if (analysis) {
     const [bookId, id, part] = [decodeURIComponent(analysis[1]), analysis[2] && decodeURIComponent(analysis[2]), analysis[3]];
     const rel = analysis[4] ? analysis[4].split('/').map(decodeURIComponent).join('/') : null;
@@ -111,6 +111,7 @@ async function handleApi(req, res, url) {
     if (req.method === 'PUT' && id && !part) return sendJson(res, 200, await store.renameAnalysis({ ...(await readBody(req)), bookId, id }));
     if (req.method === 'DELETE' && id && !part) return busy() ? refuse() : sendJson(res, 200, await store.deleteAnalysis(bookId, id));
     if (req.method === 'DELETE' && part === 'messages' && !rel) return busy() ? refuse() : sendJson(res, 200, await store.clearAnalysisMessages(bookId, id));
+    if (req.method === 'PUT' && part === 'inputs' && !rel) return sendJson(res, 200, await store.setAnalysisInputs({ bookId, id, inputs: (await readBody(req)).inputs }));
     if (req.method === 'GET' && part === 'results' && rel) return sendResultFile(res, await store.readAnalysisResult(bookId, id, rel), url.searchParams.get('download') === '1');
     if (req.method === 'DELETE' && part === 'results' && rel) return sendJson(res, 200, await store.deleteAnalysisResult(bookId, id, rel));
   }

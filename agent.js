@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { prepareConnections } from './lib/agent_config.js';
-import { ANALYSIS_INSTRUCTIONS, ANALYSIS_SYNC_MS, ANALYSIS_TURN_MS, analysisBlock, analysisTocBlock, syncSummary } from './lib/analysis_agent.js';
+import { ANALYSIS_INSTRUCTIONS, ANALYSIS_SYNC_MS, ANALYSIS_TURN_MS, analysisBlock, analysisTocBlock, syncSummary, writeInputs } from './lib/analysis_agent.js';
 import { collectSource } from './lib/collect.js';
 import { isNote, isReviewNote, NOTE_RULE, reviewNotes } from './lib/guide_notes.js';
 import { structurePaths } from './lib/guide_outline.js';
@@ -772,10 +772,10 @@ async function formTurn(conv, modelKey, text, bookId, formId, emit) {
 
 // ───────────────────────────── 데이터 분석의 대화 (FR-WB-106, ERR-WB-010) ─────────────────────────────
 
-// 프롬프트 — 분석 정보(결과 파일 목록)와 목차는 매번, 전체 원문 목록·기준 문서는 바뀌었을 때만
-function buildAnalysisPrompt(conv, modelKey, text, { book, analysis, results }, connections) {
+// 프롬프트 — 분석 정보(입력 자료·결과 파일 목록)와 목차는 매번, 전체 원문 목록·기준 문서는 바뀌었을 때만
+function buildAnalysisPrompt(conv, modelKey, text, { book, analysis, results }, inputFiles, connections) {
   const parts = preamble(conv, modelKey, connections);
-  parts.push(analysisBlock(analysis, results, book), analysisTocBlock(book));
+  parts.push(analysisBlock(analysis, results, book, inputFiles), analysisTocBlock(book));
   pushBookSources(parts, conv, modelKey, book);
   parts.push(text);
   return parts.join('\n\n');
@@ -793,6 +793,9 @@ async function analysisTurn(conv, modelKey, text, emit) {
   }
   const dir = viewDirFor(conv);
   await writeBookView(dir, state.book);
+  const inputFiles = await writeInputs(dir, state.inputs, { sourceText, guideText }); // 작성자가 고른 입력 자료 — 다른 보고서의 것도 (FR-WB-107)
+  const missing = state.inputs.filter(i => i.missing);
+  if (missing.length) emit({ t: 'notice', text: `없어진 입력 자료 ${missing.length}개는 에이전트에게 넘기지 않았습니다: ${missing.map(i => `${i.bookTitle} › ${i.parentTitle} › ${i.title}`).join(' / ')}` });
   const results = path.join(dir, RESULTS_DIR);
   let known = await host.seedAnalysisResults(bookId, analysisId, results);
   const totals = { saved: new Set(), removed: new Set() };
@@ -814,7 +817,7 @@ async function analysisTurn(conv, modelKey, text, emit) {
   try {
     const connections = await prepareConnections(dir, { analysis: true });
     for (const problem of connections.problems) emit({ t: 'notice', text: problem });
-    const turn = await askFresh(conv, modelKey, () => buildAnalysisPrompt(conv, modelKey, text, state, connections), connections, emit);
+    const turn = await askFresh(conv, modelKey, () => buildAnalysisPrompt(conv, modelKey, text, state, inputFiles, connections), connections, emit);
     if (turn.aborted || turn.failed) return;
     conv.transcript.push({ role: 'user', text, at: askedAt }, { role: 'assistant', text: turn.text, model: modelKey, at: new Date().toISOString() });
     const kept = await host.saveAnalysisMessages({ bookId, id: analysisId, messages: conv.transcript }).catch(err => emit({ t: 'notice', text: `문답을 보관하지 못했습니다: ${err.message}` }));

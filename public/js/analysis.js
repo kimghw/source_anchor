@@ -1,10 +1,11 @@
-// 데이터 분석 화면 — 에이전트와 함께 보고서의 기준 문서·원문을 분석해 결과를 파일로 남긴다 (FR-WB-088, 106).
-// 1열 결과 파일(결과 폴더 위치, 파일 목록, 내용 보기·내려받기·삭제) · 2열 분석 에이전트(analysis_chat.js) · 3열 보고서의 작성 기준·원문(report_sources.js, 읽기 전용).
+// 데이터 분석 화면 — 에이전트와 함께 보고서의 기준 문서·원문을 분석해 결과를 파일로 남긴다 (FR-WB-088, 106, 107).
+// 1열 입력 자료(고른 자료 — 빼기·열기)와 결과 파일(결과 폴더 위치, 파일 목록, 내용 보기·내려받기·삭제) · 2열 분석 에이전트(analysis_chat.js) ·
+// 3열 자료 탐색기(data_explorer.js — 작업공간 전체의 기준 문서·장별 원문·다른 분석의 결과 파일을 보고 입력 자료로 고른다).
 // 0열 탐색기 「데이터 분석」 탭에서 열린다. 보고서·장·양식 화면 모듈(book.js·documents.js·forms.js)을 import 하지 않는다 — 화면 전환 진입점은 app.js 가 넘긴다.
 import { analysisBusy, initAnalysisChat, setAnalysisView } from './analysis_chat.js';
 import { collapseButton } from './columns.js';
+import { dataExplorer, inputKey, inputKindLabel } from './data_explorer.js';
 import { redrawExplorer, showExplorer } from './explorer.js';
-import { reportSourcesColumn } from './report_sources.js';
 import { api, flushSave } from './state.js';
 import { debounce, fill, formatDate, h, toast } from './util.js';
 
@@ -14,7 +15,8 @@ const $ = id => document.getElementById(id);
 const go = { openBook: async () => {}, flushForm: async () => true };
 let bookId = null;
 let book = null; // 보고서 상태 { book, chapters, sources, guides, analyses, forms } — 3열·탐색기
-let analysis = null; // 열어 둔 분석 { id, title, messages, createdAt, updatedAt }
+let analysis = null; // 열어 둔 분석 { id, title, messages, inputs, createdAt, updatedAt }
+let inputs = []; // 입력 자료 — 서버가 이름을 붙여 준다 [{ kind, bookId, chapterId?, id?, analysisId?, path?, key, bookTitle, parentTitle, title, missing? }]
 let results = []; // [{ path, ext, size, updatedAt, invalid? }]
 let folder = ''; // 결과 폴더 — 작업공간 안의 실제 위치
 let openPath = null; // 1열에서 내용을 보고 있는 결과 파일
@@ -34,10 +36,10 @@ export function initAnalyses(handlers) {
     h('button.btn.small.ghost.to-book', { type: 'button', title: '보고서 화면으로', onclick: leave }, '↩ 보고서'),
     h('span.doc-kind', '데이터 분석'),
     h('span.doc-current.analysis-current'));
-  sourcesCol = reportSourcesColumn($('analysis-sources'), { key: 'analysis', label: '3열 작성 기준·원문', reload: () => reloadBook() });
+  sourcesCol = dataExplorer($('analysis-sources'), { label: '3열 자료 탐색기', selected: () => new Set(inputs.map(i => i.key)), toggle: setInputs });
   initAnalysisChat($('analysis-chat'), {
     resultsChanged, busyChanged: () => redrawExplorer(), openResult: rel => openResult(rel),
-    openGuide: (id, at) => sourcesCol.openGuide(id, at), openSource: (chapterId, sourceId, at) => sourcesCol.openSource(chapterId, sourceId, at),
+    openGuide: (owner, id, at) => sourcesCol.openGuide(owner, id, at), openSource: (owner, chapterId, sourceId, at) => sourcesCol.openSource(owner, chapterId, sourceId, at),
   });
   window.addEventListener('beforeunload', () => { if (pending) save.flush(); });
 }
@@ -58,14 +60,14 @@ export async function openAnalysis(wantedBookId, id) {
     const opened = await api('GET', analysisUrl(state.book.id, id));
     bookId = state.book.id;
     book = state;
-    ({ analysis, results, folder } = opened);
+    ({ analysis, inputs, results, folder } = opened);
     openPath = null;
     history.replaceState(null, '', `?report=${encodeURIComponent(bookId)}&analysis=${encodeURIComponent(analysis.id)}`);
     showAnalysisScreen(true);
     renderHead();
     renderResults();
     setAnalysisView({ bookId, analysis }); // 2열 — 그 분석의 대화(진행 중이면 그대로)
-    sourcesCol.show(bookId, book, { reset: true });
+    sourcesCol.show({ bookId, analysisId: analysis.id, book }, { reset: true });
     explore();
   } catch (err) {
     toast(err.message, 'error');
@@ -106,13 +108,6 @@ function showAnalysisScreen(on) {
 const onScreen = () => !$('analysis-workspace').hidden;
 const explore = () => showExplorer({ book: book.book, chapters: book.chapters, current: null, analyses: book.analyses, forms: book.forms, currentAnalysis: analysis.id });
 
-// 기준 문서를 등록·고치기·삭제한 뒤 — 보고서 상태를 다시 받아 3열과 탐색기를 그린다
-async function reloadBook() {
-  book = await api('GET', bookUrl(bookId));
-  sourcesCol.show(bookId, book);
-  explore();
-}
-
 // ───────────────────────────── 제목 ─────────────────────────────
 
 // 상단 머리줄 — 분석 제목은 그 자리에서 고치고 자동 저장한다. 비우면 서버가 「제목 없는 분석」으로 둔다
@@ -150,7 +145,7 @@ function queueSave() {
 async function resultsChanged(owner, id) {
   try {
     if (onScreen() && owner === bookId && id === analysis.id) {
-      ({ results, folder } = await api('GET', analysisUrl(owner, id)));
+      ({ inputs, results, folder } = await api('GET', analysisUrl(owner, id)));
       renderResults();
     }
     if (owner === bookId) redrawExplorer(book.analyses = (await api('GET', analysisUrl(owner))).analyses);
@@ -172,6 +167,41 @@ function renderResults() {
     opened ? preview(opened) : resultList());
 }
 
+// ───────────────────────────── 1열 입력 자료 (FR-WB-107) ─────────────────────────────
+
+// 3열 자료 탐색기의 고르기 칸 · 1열의 빼기 — 목록을 통째로 저장하고, 서버가 붙여 준 이름으로 다시 그린다
+async function setInputs(items, on) {
+  const target = { owner: bookId, id: analysis.id };
+  const keys = new Set(items.map(inputKey));
+  const next = on ? [...inputs, ...items.filter(i => !inputs.some(x => x.key === inputKey(i)))] : inputs.filter(i => !keys.has(i.key));
+  try {
+    const res = await api('PUT', `${analysisUrl(target.owner, target.id)}/inputs`, { inputs: next.map(({ kind, bookId: owner, chapterId, id, analysisId, path }) => ({ kind, bookId: owner, chapterId, id, analysisId, path })) });
+    if (target.owner !== bookId || target.id !== analysis.id) return; // 그사이 다른 분석을 열었다
+    inputs = res.inputs;
+    book.analyses = res.analyses;
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+  if (!openPath) renderResults();
+  sourcesCol.refresh();
+}
+
+function inputSection() {
+  const missing = inputs.filter(i => i.missing).length;
+  return h('section.analysis-inputs',
+    h('div.analysis-inputs-head',
+      h('span', '입력 자료 ', h('span.count', String(inputs.length)), missing > 0 && h('span.input-missing', ` 없어짐 ${missing}`)),
+      inputs.length > 0 && h('button.btn.small.ghost', { type: 'button', title: '입력 자료를 모두 뺍니다', onclick: () => { if (confirm(`입력 자료 ${inputs.length}개를 모두 뺄까요?`)) setInputs(inputs, false); } }, '모두 빼기')),
+    inputs.length
+      ? h('ul.input-list', inputs.map(i => h('li.input-row', { class: i.missing ? 'is-missing' : '' },
+        h('button.input-open', { type: 'button', title: `${i.bookTitle} › ${i.parentTitle} › ${i.title}${i.missing ? '\n없어진 자료입니다 — 에이전트에게 넘기지 않습니다' : '\n누르면 3열에서 엽니다'}`, onclick: () => !i.missing && sourcesCol.openInput(i) },
+          h('span.input-kind', inputKindLabel(i.kind)),
+          h('span.input-path', `${i.bookId === bookId ? '' : `${i.bookTitle} › `}${i.parentTitle} › ${i.title}`),
+          i.missing && h('span.input-missing', '없어짐')),
+        h('button.icon-btn', { type: 'button', title: '입력 자료에서 빼기', 'aria-label': `${i.title} 빼기`, onclick: () => setInputs([i], false) }, '✕'))))
+      : h('p.analysis-inputs-empty', '3열 자료 탐색기에서 고르면 여기에 들어오고, 에이전트가 먼저 읽습니다. 고르지 않으면 이 보고서의 기준 문서·원문을 읽습니다.'));
+}
+
 function folderLine() {
   return h('div.analysis-folder',
     h('span.analysis-folder-label', '결과 폴더'),
@@ -181,9 +211,9 @@ function folderLine() {
 
 function resultList() {
   if (!results.length) {
-    return h('div.analysis-body', folderLine(), h('div.empty', h('div.empty-icon', { 'aria-hidden': 'true' }, '▤'), h('p', '아직 결과 파일이 없습니다.'), h('p.muted', '2열의 분석 에이전트에게 무엇을 분석해 어떤 파일로 남길지 알려 주세요.')));
+    return h('div.analysis-body', inputSection(), folderLine(), h('div.empty', h('div.empty-icon', { 'aria-hidden': 'true' }, '▤'), h('p', '아직 결과 파일이 없습니다.'), h('p.muted', '2열의 분석 에이전트에게 무엇을 분석해 어떤 파일로 남길지 알려 주세요.')));
   }
-  return h('div.analysis-body', folderLine(),
+  return h('div.analysis-body', inputSection(), folderLine(),
     h('ul.result-list', results.map(r => h('li.result-row', { class: r.invalid ? 'is-invalid' : '' },
       h('button.result-open', { type: 'button', title: `${r.path}\n누르면 내용을 봅니다`, onclick: () => openResult(r.path) },
         h('span.result-path', r.path),

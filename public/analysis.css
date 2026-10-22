@@ -1,0 +1,55 @@
+/* 데이터 분석 화면 (FR-WB-088, 106, 107) — 0열 답하는 중 표시, 1열 입력 자료·결과 파일, 3열 자료 탐색기. 토큰은 style.css 의 것을 쓴다 */
+.analysis-row .tree-busy { margin-right: 6px; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.analysis-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); overflow-y: auto; }
+.analysis-folder { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-2); font-size: var(--text-sm); }
+.analysis-folder-label { color: var(--ink-2); font-weight: 600; }
+.analysis-folder-path { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+.result-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-1); }
+.result-row { display: flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.result-row:hover, .result-row:focus-within { border-color: var(--accent); }
+.result-row.is-invalid { border-color: var(--bad); }
+.result-open { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-md); background: none; color: var(--ink); text-align: left; cursor: pointer; }
+.result-path { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.result-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.result-ext { padding: 0 6px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font-size: 10.5px; font-weight: 600; }
+.result-invalid { color: var(--bad); font-weight: 700; }
+.result-actions { display: flex; align-items: center; gap: 2px; padding-right: var(--space-1); }
+.result-actions a { text-decoration: none; }
+.result-view-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
+.result-note { margin: 0; font-size: var(--text-sm); }
+.result-note:empty { display: none; }
+.result-preview { flex: 1; min-height: 120px; margin: 0; padding: var(--space-3); overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-2); color: var(--ink); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre; tab-size: 2; }
+.ref.result-ref { font-family: var(--mono); }
+
+/* 1열 입력 자료 — 3열 자료 탐색기에서 고른 것 (FR-WB-107) */
+.analysis-inputs { flex: none; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.analysis-inputs-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 40px; padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); color: var(--ink); font-size: var(--text-sm); font-weight: 600; }
+.input-list { margin: 0; padding: 4px; list-style: none; max-height: 32vh; overflow-y: auto; }
+.input-row { display: flex; align-items: center; gap: 2px; border-radius: var(--radius-sm); }
+.input-row:hover, .input-row:focus-within { background: var(--hover); }
+.input-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--space-2); padding: 5px 6px; border: 0; background: none; color: var(--ink); font: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
+.input-kind { flex: none; padding: 0 6px; border-radius: 4px; background: var(--hover); color: var(--ink-2); font-size: 10.5px; font-weight: 600; }
+.input-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.input-row.is-missing .input-path { color: var(--muted); text-decoration: line-through; }
+.input-missing { flex: none; color: var(--bad); font-size: 11px; font-weight: 700; }
+.analysis-inputs-empty { margin: 0; padding: var(--space-2) var(--space-3); color: var(--muted); font-size: 12px; line-height: 1.6; }
+/* 3열 자료 탐색기 — 보고서 › 기준 문서·장별 원문(장 › 원문)·데이터 분석(분석 › 결과 파일), 칸으로 입력 자료 고르기 */
+.data-tree { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-3); font-size: var(--text-sm); }
+.data-hint { margin: 0 4px var(--space-3); color: var(--muted); font-size: 12px; line-height: 1.6; }
+.dt-row { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 2px 6px 2px calc(6px + var(--depth, 0) * 16px); border-radius: var(--radius-sm); }
+.dt-row:hover { background: var(--hover); }
+.dt-row.is-picked { background: var(--accent-soft); }
+.dt-fold { flex: none; width: 18px; padding: 0; border: 0; background: none; color: var(--muted); font-size: 11px; cursor: pointer; }
+.dt-check { flex: none; width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.dt-check-gap { flex: none; width: 15px; }
+.dt-icon { flex: none; width: 14px; color: var(--muted); font-size: 11px; text-align: center; }
+.dt-name { flex: 1; min-width: 0; padding: 3px 0; overflow: hidden; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.dt-name:hover { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 3px; }
+.dt-folder { font-weight: 600; }
+.dt-meta { flex: none; max-width: 40%; overflow: hidden; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.dt-row .type-badge { flex: none; }
+.dt-empty { padding: 4px 6px 4px calc(28px + var(--depth, 0) * 16px); color: var(--muted); font-size: 12px; }
+.dt-pick { margin-left: auto; }
+@media (max-width: 1400px) {
+  .analysis-body { padding: var(--space-3); }
+}

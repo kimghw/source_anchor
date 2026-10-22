@@ -31,7 +31,8 @@ if (system.includes('You file away a conversation')) {
   } else if (verb === 'delete') fs.rmSync(file, { force: true });
   const listed = prompt.match(/result files in results\/ \((\d+)\)/)?.[1] ?? '?';
   const guide = prompt.match(/^- (G-\d{3,}) \[/m)?.[1];
-  text = `${carried()}. 결과 ${listed}개를 보았습니다. tools=${arg('--tools')} allowed=${arg('--allowedTools')}${guide ? ` 근거 ${guide}.b1.s1` : ''}${verb === 'write' ? ` 파일 results/${rel}` : ''}`;
+  const inputs = prompt.match(/input files the user chose \((\d+)\)/)?.[1] ?? '?';
+  text = `${carried()}. 결과 ${listed}개를 보았습니다. tools=${arg('--tools')} allowed=${arg('--allowedTools')}${guide ? ` 근거 ${guide}.b1.s1` : ''}${verb === 'write' ? ` 파일 results/${rel}` : ''} 입력 ${inputs}개`;
 } else if (system.includes('a research subagent')) {
   text = `subagent tools=${arg('--tools')} allowed=${arg('--allowedTools')}`;
 } else {

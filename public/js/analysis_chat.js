@@ -202,10 +202,10 @@ function scrollToEnd(session) {
 }
 
 // ───────────────────────────── 답 속의 링크 ─────────────────────────────
-// 기준 문서 위치(G-003 · G-003.b12.s2 · G-001.p21.b3.s2)와 장 표시가 붙은 원문 위치(R-002/S-001 · R-002/S-001.b5.s2)는 3열에서 열고,
-// 결과 파일 경로(results/…)는 1열에서 연다
+// 기준 문서 위치(G-003 · G-003.b12.s2 · G-001.p21.b3.s2)와 장 표시가 붙은 원문 위치(R-002/S-001 · R-002/S-001.b5.s2)는 3열 자료 탐색기에서 열고 —
+// 앞에 보고서 표시(M-003/…)가 있으면 그 보고서의 것, 없으면 지금 보고서의 것 (FR-WB-107 (d)) — 결과 파일 경로(results/…)는 1열에서 연다
 
-const LINK_RE = /\b(G-\d{3,}(?:\.(?:p\d+|b\d+|s\d+|r\d+c\d+))*)\b|\b(R-\d{3,})\/(S-\d{3}(?:\.b\d+\.(?:s\d+|r\d+c\d+))?)\b|(?<![\w/.-])results\/([^\s`'"<>()[\]{},;]+\.(?:json|ya?ml|csv|md|txt))/g;
+const LINK_RE = /(?:\b(M-\d{3,})\/)?\b(G-\d{3,}(?:\.(?:p\d+|b\d+|s\d+|r\d+c\d+))*)\b|(?:\b(M-\d{3,})\/)?\b(R-\d{3,})\/(S-\d{3}(?:\.b\d+\.(?:s\d+|r\d+c\d+))?)\b|(?<![\w/.-])results\/([^\s`'"<>()[\]{},;]+\.(?:json|ya?ml|csv|md|txt))/g;
 const wrap = (text, code) => (code ? h('code', text) : text);
 
 function analysisLinks(text, code = false) {
@@ -213,9 +213,9 @@ function analysisLinks(text, code = false) {
   let at = 0;
   for (const m of text.matchAll(LINK_RE)) {
     if (at < m.index) nodes.push(wrap(text.slice(at, m.index), code));
-    if (m[1]) nodes.push(h('button.ref', { type: 'button', dataset: { guideRef: m[1] }, title: `${m[1]}\n3열에서 이 기준 문서${m[1].includes('.') ? '의 이 위치' : ''}를 엽니다` }, m[1]));
-    else if (m[2]) nodes.push(h('button.ref', { type: 'button', dataset: { sourceRef: `${m[2]}/${m[3]}` }, title: `${m[0]}\n3열에서 이 원문을 엽니다` }, m[0]));
-    else nodes.push(h('button.ref.result-ref', { type: 'button', dataset: { resultRef: m[4] }, title: `${m[0]}\n1열에서 이 결과 파일을 엽니다` }, m[0]));
+    if (m[2]) nodes.push(h('button.ref', { type: 'button', dataset: { guideRef: m[2], bookRef: m[1] ?? '' }, title: `${m[0]}\n3열에서 이 기준 문서${m[2].includes('.') ? '의 이 위치' : ''}를 엽니다` }, m[0]));
+    else if (m[4]) nodes.push(h('button.ref', { type: 'button', dataset: { sourceRef: `${m[4]}/${m[5]}`, bookRef: m[3] ?? '' }, title: `${m[0]}\n3열에서 이 원문을 엽니다` }, m[0]));
+    else nodes.push(h('button.ref.result-ref', { type: 'button', dataset: { resultRef: m[6] }, title: `${m[0]}\n1열에서 이 결과 파일을 엽니다` }, m[0]));
     at = m.index + m[0].length;
   }
   if (at < text.length) nodes.push(wrap(text.slice(at), code));
@@ -226,13 +226,12 @@ function onLogClick(event) {
   const guide = event.target.closest('[data-guide-ref]');
   if (guide) {
     const ref = guide.dataset.guideRef;
-    const id = ref.split('.')[0];
-    return go.openGuide(id, ref.includes('.') ? ref : null);
+    return go.openGuide(guide.dataset.bookRef || null, ref.split('.')[0], ref.includes('.') ? ref : null);
   }
   const source = event.target.closest('[data-source-ref]');
   if (source) {
     const [chapterId, rest] = source.dataset.sourceRef.split('/');
-    return go.openSource(chapterId, rest.split('.')[0], rest.includes('.') ? rest : null);
+    return go.openSource(source.dataset.bookRef || null, chapterId, rest.split('.')[0], rest.includes('.') ? rest : null);
   }
   const result = event.target.closest('[data-result-ref]');
   if (result) go.openResult(result.dataset.resultRef);

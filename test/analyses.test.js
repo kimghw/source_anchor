@@ -100,6 +100,53 @@ test('보관: 보고서마다 A-번호(지운 번호는 다시 쓰지 않음)·�
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test('입력 자료 모양: 종류별 필드와 번호 꼴, 겹친 것은 하나로, 한도', () => {
+  const list = analyses.cleanInputs([
+    { kind: 'source', bookId: 'M-003', chapterId: 'R-010', id: 'S-001', extra: 'x' },
+    { kind: 'source', bookId: 'M-003', chapterId: 'R-010', id: 'S-001' },
+    { kind: 'guide', bookId: 'M-005', id: 'G-003' },
+    { kind: 'result', bookId: 'M-005', analysisId: 'A-002', path: 'G-003/part-01.json' },
+  ]);
+  assert.deepEqual(list.map(analyses.inputKey), ['source:M-003/R-010/S-001', 'guide:M-005/G-003', 'result:M-005/A-002/G-003/part-01.json']);
+  for (const bad of [{ kind: 'source', bookId: 'M-003', id: 'S-001' }, { kind: 'guide', bookId: '../x', id: 'G-001' }, { kind: 'result', bookId: 'M-001', analysisId: 'A-001', path: '../a.json' }, { kind: 'memo' }, null]) assert.throws(() => analyses.cleanInputs([bad]), /알아볼 수 없습니다/, JSON.stringify(bad));
+  assert.throws(() => analyses.cleanInputs(Array.from({ length: analyses.INPUT_LIMIT + 1 }, (_, i) => ({ kind: 'guide', bookId: 'M-001', id: `G-${String(i + 1).padStart(3, '0')}` }))), /500개까지/);
+});
+
+test('입력 자료 보관: 다른 보고서의 원문·기준 문서·다른 분석의 결과를 이름과 함께, 없는 것은 넣지 못하고, 넣은 뒤 없어지면 표시한다', async () => {
+  const dir = await tempDir('sourceanchor-analyses-inputs-');
+  process.env.WORKSPACE = dir;
+  const store = await import(`../lib/store.js?inputs=${Date.now()}`);
+  const { book } = await store.loadBookState();
+  const other = (await store.createBook({ title: '다른 보고서' })).book;
+  const chapter = (await store.insertChapter({ bookId: other.id, title: '배경 장', level: 1, after: 'end' })).chapters.at(-1);
+  const source = await store.addSource({ docId: chapter.id, title: '원문 하나', markdown: '이 규칙은 선박에 적용한다.' });
+  const guide = (await store.addGuide({ bookId: book.id, kind: 'reference', title: '선급 규칙', markdown: 'These rules apply to ships.' })).guide ?? (await store.guideList(book.id))[0];
+  const { analysis: prior } = await store.createAnalysis({ bookId: book.id, title: '앞선 분석' });
+  await analyses.seedResults(path.join(dir, 'projects', book.id), prior.id, path.join(dir, 'seed'));
+  await put(path.join(dir, 'projects', book.id, 'analyses', prior.id, 'results'), 'scope.json', '{"ok":true}');
+  const { analysis } = await store.createAnalysis({ bookId: book.id, title: '적용범위' });
+  const wanted = [
+    { kind: 'source', bookId: other.id, chapterId: chapter.id, id: source.id },
+    { kind: 'guide', bookId: book.id, id: guide.id },
+    { kind: 'result', bookId: book.id, analysisId: prior.id, path: 'scope.json' },
+  ];
+  const saved = await store.setAnalysisInputs({ bookId: book.id, id: analysis.id, inputs: wanted });
+  assert.deepEqual(saved.inputs.map(i => [i.kind, i.bookTitle, i.parentTitle, i.title, i.missing ?? false]), [
+    ['source', '다른 보고서', '배경 장', '원문 하나', false], ['guide', book.title, '기준 문서', '선급 규칙', false], ['result', book.title, '앞선 분석', 'scope.json', false]]);
+  assert.equal(saved.analyses.find(a => a.id === analysis.id).inputs, 3);
+  await assert.rejects(store.setAnalysisInputs({ bookId: book.id, id: analysis.id, inputs: [...wanted, { kind: 'guide', bookId: book.id, id: 'G-099' }] }), /없는 자료는/);
+  await assert.rejects(store.setAnalysisInputs({ bookId: book.id, id: analysis.id, inputs: [{ kind: 'result', bookId: book.id, analysisId: analysis.id, path: 'a.json' }] }), /이 분석의 결과 파일/);
+
+  const state = await store.analysisAgentState(book.id, analysis.id);
+  assert.deepEqual(state.inputs.map(i => [i.kind, Boolean(i.source || i.guide || i.data)]), [['source', true], ['guide', true], ['result', true]]);
+  await store.deleteSource(chapter.id, source.id); // 고른 원문이 없어졌다
+  const reopened = await store.getAnalysis(book.id, analysis.id);
+  assert.deepEqual(reopened.inputs.map(i => i.missing ?? false), [true, false, false]);
+  const kept = await store.setAnalysisInputs({ bookId: book.id, id: analysis.id, inputs: reopened.inputs.slice(0, 2) }); // 이미 들어 있던 없어진 항목은 남겨 둘 수 있다
+  assert.equal(kept.inputs.length, 2);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test('에이전트: 분석 대화는 results/ 에만 쓰는 도구로 돌고, 응답마다 결과를 거두고(results 이벤트·알림), 문답을 보관해 대화를 잃어도 이어 간다', async () => {
   const dir = await tempDir('sourceanchor-analyses-agent-');
   process.env.WORKSPACE = path.join(dir, 'ws');
@@ -142,6 +189,20 @@ test('에이전트: 분석 대화는 results/ 에만 쓰는 도구로 돌고, �
   assert.deepEqual((await store.getAnalysis(book.id, analysis.id)).results, []);
   assert.equal((await store.getAnalysis(book.id, analysis.id)).analysis.messages.length, 6);
   assert.equal(agent.analysisRunning(book.id, analysis.id), false);
+
+  // 입력 자료 — 다른 보고서의 원문을 고르면 작업 폴더 inputs/ 에 앵커를 붙인 글로 놓이고 프롬프트에 알린다 (FR-WB-107)
+  const other = (await store.createBook({ title: '다른 보고서' })).book;
+  const chapter = (await store.insertChapter({ bookId: other.id, title: '배경', level: 1, after: 'end' })).chapters.at(-1);
+  const picked = await store.addSource({ docId: chapter.id, title: '원문', markdown: '이 규칙은 선박에 적용한다.' });
+  await store.setAnalysisInputs({ bookId: book.id, id: analysis.id, inputs: [{ kind: 'source', bookId: other.id, chapterId: chapter.id, id: picked.id }] });
+  const withInput = await ask({ conversationId: lost.start.conversationId, text: '입력 자료를 읽어라' });
+  assert.match(withInput.text, /입력 1개/);
+  const inputFile = path.join(process.env.TEMP, 'sourceanchor-agent', 'analysis', lost.start.conversationId, 'inputs', other.id, chapter.id, `${picked.id}.md`);
+  assert.match(await fs.readFile(inputFile, 'utf8'), new RegExp(`cite as ${other.id}/${chapter.id}/<anchor id>[\\s\\S]*\\[${picked.id}\\.b1\\.s1\\] 이 규칙은 선박에 적용한다\\.`));
+  await store.deleteSource(chapter.id, picked.id);
+  const gone = await ask({ conversationId: lost.start.conversationId, text: '다시' });
+  assert.match(gone.text, /입력 0개/);
+  assert.ok(gone.notices.some(n => n.startsWith('없어진 입력 자료 1개는 에이전트에게 넘기지 않았습니다')), gone.notices.join(' / '));
 
   const book2 = await ask({ text: '보고서 화면', analysisId: null }); // 다른 화면의 대화는 쓰기 도구가 없다
   assert.doesNotMatch(book2.text, /tools=/);
